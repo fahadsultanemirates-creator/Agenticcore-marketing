@@ -4,6 +4,7 @@
   "audience": "Who this project's content is for",
   "goal": "What each post should drive (signups, bookings, sales, etc.)",
   "tone": "confident and clear",
+  "media": "image",
   "ayrshare_profile_key": "REPLACE_WITH_THIS_PROJECT_AYRSHARE_PROFILE_KEY",
   "telegram_chat_id": null,
   "channels": [

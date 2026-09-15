@@ -109,6 +109,21 @@ class MarketingOrchestrator:
             {**asdict(brief), "strategy": strategy, "platform": platform},
         )
 
+    def draft_video_script(self, brief: CampaignBrief, strategy: str) -> AgentResult:
+        """Draft the words an avatar speaks in a short vertical video.
+
+        Deliberately not the post caption. A caption is read; this is heard,
+        so it gets no hashtags, no emoji, and no "link in bio" — HeyGen
+        renders whatever comes back verbatim, stage directions included.
+        """
+
+        return self.social.run(
+            "Write the spoken script for a 20-30 second vertical social video. "
+            "Return only the words to be spoken: no scene directions, no "
+            "speaker labels, no hashtags, no emoji, and no markdown.",
+            {**asdict(brief), "strategy": strategy},
+        )
+
     def run_campaign(self, brief: CampaignBrief) -> CampaignPlan:
         results: Dict[str, AgentResult] = {}
 

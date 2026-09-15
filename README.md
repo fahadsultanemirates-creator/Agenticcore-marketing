@@ -44,9 +44,10 @@ brands/<slug>.json (audience, tone, goal, linked pages)
 MarketingOrchestrator          --> one strategy for the brand, then one
       |                            post per page, written for that platform
       v
-Creative tool (optional)       --> Ideogram / Grok / HeyGen generates an image or video
-      |
-      v
+Creative tool (per brand's       --> "image": Ideogram / Grok
+  "media" setting)                   "video": HeyGen avatar video (spoken script
+      |                                        drafted separately from the caption)
+      v                                "none": text-only posts
 DraftStore (SQLite)            --> one PostDraft per configured page, status=pending_approval
       |
       v
@@ -76,6 +77,7 @@ agenticcore/
   config.py                # load_env(): reads .env into os.environ
   orchestrator.py          # CampaignBrief, CampaignPlan, MarketingOrchestrator
   brands.py                # BrandProfile / BrandRegistry (one JSON file per project)
+                           #   incl. the per-brand "media" toggle
   queue.py                 # PostDraft / DraftStore (SQLite-backed approval queue)
   pipeline.py              # ContentPipeline: wires everything below together
   agents/
@@ -125,15 +127,42 @@ tests/
 3. **Creative tools** (optional, for images/video instead of text-only
    posts): set `IDEOGRAM_API_KEY` and/or `XAI_API_KEY` (Grok) for images, or
    `HEYGEN_API_KEY` + `HEYGEN_AVATAR_ID` + `HEYGEN_VOICE_ID` for avatar video.
+   All three HeyGen variables are required together — the avatar and voice
+   ids come from your HeyGen dashboard. Then set `"media"` on each brand
+   (see below) to say which it should use.
 4. Copy `brands/example.json` to `brands/<your-project-slug>.json` per
    project (5-6 of them, to start) and fill in its audience, tone, goal, and
    which channels/pages it owns.
 5. Fill in `.env` from `.env.example` with all of the above.
 
 ```bash
-python examples/run_pipeline.py <your-project-slug>            # queue + listen for approvals
+python examples/run_pipeline.py <your-project-slug>            # queue that brand, then listen
+python examples/run_pipeline.py --all                          # queue every brand, then listen
+python examples/run_pipeline.py --listen                       # listen only, generate nothing
 python examples/run_pipeline.py <your-project-slug> --dry-run  # preview only, no network calls
 ```
+
+`--listen` is what you want after a restart. Drafts live in SQLite, so a run
+that was interrupted leaves them `pending_approval`; `--listen` picks those
+up and waits for taps instead of generating a fresh campaign nobody asked
+for. Every brand's approval chat is authorized at startup in this mode, not
+just the one being generated for.
+
+### Choosing creative per brand
+
+A brand's `"media"` field decides what its posts carry. One asset is
+generated per campaign and shared across that brand's pages, the way a
+single graphic gets reused across a Facebook page and an Instagram account —
+the captions are still written per page.
+
+| `"media"` | Needs | Produces |
+| --- | --- | --- |
+| `"image"` (default) | `IDEOGRAM_API_KEY` or `XAI_API_KEY` | One graphic |
+| `"video"` | `HEYGEN_API_KEY` + `HEYGEN_AVATAR_ID` + `HEYGEN_VOICE_ID` | One avatar video, from a spoken script drafted separately from the captions |
+| `"none"` | nothing | Text-only posts |
+
+A brand asking for creative you haven't configured a backend for degrades to
+text-only and says so on startup, rather than failing the campaign.
 
 ## Quickstart
 

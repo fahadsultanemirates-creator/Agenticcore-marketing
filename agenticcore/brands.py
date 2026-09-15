@@ -13,6 +13,15 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 
+# What creative a brand's posts carry. One asset is generated per campaign and
+# shared across that brand's pages, the way a single graphic gets reused
+# across a Facebook page and an Instagram account.
+MEDIA_IMAGE = "image"
+MEDIA_VIDEO = "video"
+MEDIA_NONE = "none"
+MEDIA_CHOICES = frozenset({MEDIA_IMAGE, MEDIA_VIDEO, MEDIA_NONE})
+
+
 @dataclass
 class ChannelTarget:
     """One connected page/account belonging to a brand, ready to publish to.
@@ -45,10 +54,17 @@ class BrandProfile:
     channels: List[ChannelTarget] = field(default_factory=list)
     ayrshare_profile_key: Optional[str] = None
     telegram_chat_id: Optional[str] = None  # overrides the global default chat
+    media: str = "image"  # one of MEDIA_CHOICES; see below
 
     @classmethod
     def from_dict(cls, data: dict) -> "BrandProfile":
         channels = [ChannelTarget(**c) for c in data.get("channels", [])]
+        media = data.get("media", "image")
+        if media not in MEDIA_CHOICES:
+            raise ValueError(
+                f"brand {data.get('slug')!r}: media must be one of "
+                f"{sorted(MEDIA_CHOICES)}, got {media!r}"
+            )
         return cls(
             slug=data["slug"],
             name=data["name"],
@@ -58,6 +74,7 @@ class BrandProfile:
             channels=channels,
             ayrshare_profile_key=data.get("ayrshare_profile_key"),
             telegram_chat_id=data.get("telegram_chat_id"),
+            media=media,
         )
 
     def has_channel(self, channel_id: str) -> bool:

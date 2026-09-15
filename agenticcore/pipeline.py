@@ -2,7 +2,8 @@
 
     ContentPipeline.queue_campaign(brand_slug)
         -> runs the strategist once for that brand
-        -> optionally generates an image shared across its pages
+        -> generates the one asset its pages share (image or video,
+           per the brand's `media` setting)
         -> drafts one post per configured channel (page), written for
            that platform specifically
         -> creates one PostDraft per configured channel (page)
@@ -20,7 +21,8 @@ from typing import Optional
 
 from agenticcore.approval.telegram_bot import TelegramApprovalBot
 from agenticcore.brands import BrandRegistry
-from agenticcore.creative.base import ImageGenerator
+from agenticcore.brands import MEDIA_IMAGE, MEDIA_VIDEO
+from agenticcore.creative.base import ImageGenerator, VideoGenerator
 from agenticcore.orchestrator import CampaignBrief, MarketingOrchestrator
 from agenticcore.publishing.ayrshare import AyrshareClient
 from agenticcore.queue import DraftStore, PostDraft
@@ -35,6 +37,7 @@ class ContentPipeline:
         bot: TelegramApprovalBot,
         publisher: AyrshareClient,
         image_generator: Optional[ImageGenerator] = None,
+        video_generator: Optional[VideoGenerator] = None,
     ):
         self.brands = brands
         self.store = store
@@ -42,6 +45,19 @@ class ContentPipeline:
         self.bot = bot
         self.publisher = publisher
         self.image_generator = image_generator
+        self.video_generator = video_generator
+
+    def trust_configured_chats(self) -> None:
+        """Authorize every brand's approval chat up front.
+
+        queue_campaign trusts a brand's chat as it generates for it, which is
+        no help to a process that only listens: it never generates, so
+        without this a tap on a draft queued by an earlier run would be
+        refused as unauthorized.
+        """
+
+        for brand in self.brands.all():
+            self.bot.add_authorized_chat(brand.telegram_chat_id)
 
     def queue_campaign(self, brand_slug: str, image_prompt: Optional[str] = None) -> list[PostDraft]:
         brand = self.brands.get(brand_slug)
@@ -58,12 +74,7 @@ class ContentPipeline:
         # point: an Instagram caption and a LinkedIn post are not the same
         # text, and whatever lands here gets published verbatim.
         strategy = self.orchestrator.run_strategy(brief).output
-
-        image_url = None
-        if self.image_generator is not None:
-            image_url = self.image_generator.generate_image(
-                image_prompt or f"Social media graphic for {brand.name}. Audience: {brand.audience}."
-            )
+        image_url, video_url = self._generate_media(brand, brief, strategy, image_prompt)
 
         drafts = []
         for target in brand.channels:
@@ -75,6 +86,7 @@ class ContentPipeline:
                 channel=target.channel,
                 caption=caption,
                 image_path=image_url,
+                video_path=video_url,
                 status="pending_approval",
             )
             self.store.update(draft.id, telegram_chat_id=brand.telegram_chat_id)
@@ -86,6 +98,45 @@ class ContentPipeline:
             self.store.update(draft.id, telegram_message_id=message_id)
             drafts.append(draft)
         return drafts
+
+    def _generate_media(
+        self,
+        brand,
+        brief: CampaignBrief,
+        strategy: str,
+        image_prompt: Optional[str],
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Produce the one asset this brand's posts share, per its ``media``.
+
+        A brand asking for media it has no backend for gets text-only posts
+        rather than an error — an unset HEYGEN_API_KEY should cost you the
+        video, not the campaign.
+        """
+
+        if brand.media == MEDIA_VIDEO and self.video_generator is not None:
+            script = self.orchestrator.draft_video_script(brief, strategy).output
+            return None, self.video_generator.generate_video(script)
+
+        if brand.media == MEDIA_IMAGE and self.image_generator is not None:
+            prompt = image_prompt or (
+                f"Social media graphic for {brand.name}. Audience: {brand.audience}."
+            )
+            return self.image_generator.generate_image(prompt), None
+
+        return None, None
+
+    def queue_all(self, image_prompt: Optional[str] = None) -> list[PostDraft]:
+        """Run a campaign for every brand in the registry."""
+
+        drafts = []
+        for brand in self.brands.all():
+            drafts.extend(self.queue_campaign(brand.slug, image_prompt=image_prompt))
+        return drafts
+
+    def pending_drafts(self) -> list[PostDraft]:
+        """Drafts still waiting on a tap, e.g. queued before a restart."""
+
+        return self.store.list_by_status("pending_approval")
 
     def process_decisions(self, timeout: int = 30) -> list[PostDraft]:
         """Poll Telegram once (long-poll up to ``timeout`` seconds) and act on any taps."""
