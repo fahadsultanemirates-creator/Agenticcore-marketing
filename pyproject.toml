@@ -1,0 +1,23 @@
+[project]
+name = "agenticcore"
+version = "0.1.0"
+description = "A multi-agent framework for AI-driven marketing campaigns."
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.40.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["agenticcore*"]
