@@ -5,6 +5,7 @@ description = "A multi-agent framework for AI-driven marketing campaigns."
 requires-python = ">=3.10"
 dependencies = [
     "anthropic>=0.40.0",
+    "requests>=2.31.0",
 ]
 
 [project.optional-dependencies]
