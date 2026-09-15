@@ -11,8 +11,13 @@ class FakeTelegramBot:
 
     def __init__(self):
         self.sent = []
+        self.authorized_chats = set()
         self._next_id = 1
         self._queued_decisions = []
+
+    def add_authorized_chat(self, chat_id):
+        if chat_id:
+            self.authorized_chats.add(chat_id)
 
     def send_for_approval(self, draft, caption, chat_id=None):
         self.sent.append((draft.id, caption))

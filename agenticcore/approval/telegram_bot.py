@@ -1,7 +1,9 @@
 """Telegram-based human approval gate.
 
 Every generated post is sent to a Telegram chat with Approve/Reject buttons
-before anything goes near a real page. Nothing publishes without a tap.
+before anything goes near a real page. Nothing publishes without a tap, and
+only taps from your own configured chat(s) count — see
+``TelegramApprovalBot`` below.
 
 Setup:
   1. Message @BotFather on Telegram, run /newbot, copy the token it gives you.
@@ -16,7 +18,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Iterable, Iterator, Optional
 
 import requests
 
@@ -26,10 +28,32 @@ def _api_base(token: str) -> str:
 
 
 class TelegramApprovalBot:
-    def __init__(self, token: Optional[str] = None, default_chat_id: Optional[str] = None):
+    """Owner-only by default: only taps from a known chat id are acted on.
+
+    Anyone who finds the bot's username can open a DM with it, but a tap from
+    any chat outside ``authorized_chat_ids`` is answered with "Not
+    authorized" and never yielded as a decision — so a stray or malicious
+    user can never approve/reject a post, even if they guess a callback.
+    """
+
+    def __init__(
+        self,
+        token: Optional[str] = None,
+        default_chat_id: Optional[str] = None,
+        authorized_chat_ids: Optional[Iterable[str]] = None,
+    ):
         self.token = token or os.environ["TELEGRAM_BOT_TOKEN"]
         self.default_chat_id = default_chat_id or os.environ.get("TELEGRAM_CHAT_ID")
+        self.authorized_chat_ids: set[str] = {str(c) for c in (authorized_chat_ids or []) if c}
+        if self.default_chat_id:
+            self.authorized_chat_ids.add(str(self.default_chat_id))
         self._offset = 0
+
+    def add_authorized_chat(self, chat_id: Optional[str]) -> None:
+        """Trust an additional chat (e.g. a brand's own override chat id)."""
+
+        if chat_id:
+            self.authorized_chat_ids.add(str(chat_id))
 
     def _call(self, method: str, **params) -> dict:
         response = requests.post(f"{_api_base(self.token)}/{method}", json=params, timeout=35)
@@ -92,7 +116,11 @@ class TelegramApprovalBot:
         return data["result"]
 
     def poll_decisions(self, timeout: int = 30) -> Iterator[tuple[str, str]]:
-        """Long-poll for Approve/Reject taps; yields (draft_id, "approve"|"reject")."""
+        """Long-poll for Approve/Reject taps; yields (draft_id, "approve"|"reject").
+
+        Taps from a chat not in ``authorized_chat_ids`` are acknowledged with
+        a rejection message but never yielded, so they can't affect anything.
+        """
 
         updates = self._call("getUpdates", offset=self._offset, timeout=timeout)
         for update in updates:
@@ -100,6 +128,13 @@ class TelegramApprovalBot:
             callback = update.get("callback_query")
             if not callback or "data" not in callback:
                 continue
+
+            chat_id = str(callback.get("message", {}).get("chat", {}).get("id", ""))
+            if self.authorized_chat_ids and chat_id not in self.authorized_chat_ids:
+                self._call("answerCallbackQuery", callback_query_id=callback["id"],
+                           text="Not authorized", show_alert=True)
+                continue
+
             action, _, draft_id = callback["data"].partition(":")
             if action not in ("approve", "reject"):
                 continue

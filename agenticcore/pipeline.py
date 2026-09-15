@@ -43,6 +43,7 @@ class ContentPipeline:
 
     def queue_campaign(self, brand_slug: str, image_prompt: Optional[str] = None) -> list[PostDraft]:
         brand = self.brands.get(brand_slug)
+        self.bot.add_authorized_chat(brand.telegram_chat_id)
         brief = CampaignBrief(
             product=brand.name,
             audience=brand.audience,
