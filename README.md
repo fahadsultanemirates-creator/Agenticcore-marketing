@@ -26,6 +26,21 @@ CampaignAnalystAgent  --> KPIs, measurement plan, cross-deliverable critique
 CampaignPlan (Markdown-renderable)
 ```
 
+### Grounding rules
+
+Every agent's system prompt carries a shared set of grounding rules
+(`GROUNDING_RULES` in `agenticcore/agents/base.py`) forbidding invented
+statistics, customer counts, pricing, timeframes, named customers, awards
+and testimonials. Where a number would help but wasn't supplied in the
+brief, agents leave a bracketed placeholder — `[X%]`, `[20-minute]` — for a
+human to fill in during approval.
+
+This exists because a single Telegram tap publishes copy verbatim under a
+real brand's name, and models reach for concrete figures precisely because
+specificity reads as credible — which is what makes a fabricated number easy
+to approve by mistake. Subclass `BaseAgent` and the rules come along
+automatically; a new specialist doesn't have to opt in.
+
 Every agent is a thin wrapper (`agenticcore/agents/base.py`) around a
 pluggable `LLMClient`. The default backend calls the Claude API via the
 `anthropic` SDK; an `EchoLLMClient` offline backend is included so the
@@ -81,7 +96,7 @@ agenticcore/
   queue.py                 # PostDraft / DraftStore (SQLite-backed approval queue)
   pipeline.py              # ContentPipeline: wires everything below together
   agents/
-    base.py                # BaseAgent, AgentResult
+    base.py                # BaseAgent, AgentResult, GROUNDING_RULES
     content_strategist.py
     copywriter.py
     seo_specialist.py
@@ -110,6 +125,7 @@ tests/
   test_pipeline.py             # queueing + approve/reject, fake bot & publisher
   test_telegram_bot.py          # approval authorization (including fail-closed)
   test_config.py                 # .env parsing and precedence
+  test_agents.py                  # grounding rules reach every agent
 ```
 
 ### Setting it up for real
