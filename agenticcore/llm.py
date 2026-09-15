@@ -21,9 +21,16 @@ class LLMClient(Protocol):
 
 
 class AnthropicLLMClient:
-    """Talks to the Claude API via the official ``anthropic`` SDK."""
+    """Talks to the Claude API via the official ``anthropic`` SDK.
 
-    def __init__(self, model: str | None = None, api_key: str | None = None, max_tokens: int = 2048):
+    ``max_tokens`` is a ceiling, not a reservation — you are billed for what
+    the model actually writes. It defaults high because the longest
+    deliverables here (a three-email sequence, a full campaign critique) get
+    cut off mid-draft under a tight cap, and a truncated draft costs a whole
+    second run.
+    """
+
+    def __init__(self, model: str | None = None, api_key: str | None = None, max_tokens: int = 16000):
         import anthropic  # imported lazily so the dependency is optional for dry runs
 
         self.model = model or os.environ.get("AGENTICCORE_MODEL", "claude-sonnet-5")

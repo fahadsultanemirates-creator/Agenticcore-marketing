@@ -13,12 +13,21 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
+# Run straight from a clone — "python examples/run_campaign.py" puts this
+# file's directory on sys.path, not the repo root, so the package next door
+# would otherwise be invisible. An installed copy ("pip install -e .") takes
+# precedence; this only adds a fallback.
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
+from agenticcore.config import load_env
 from agenticcore.llm import EchoLLMClient
 from agenticcore.orchestrator import CampaignBrief, MarketingOrchestrator
 
 
 def main() -> None:
+    load_env()
     dry_run = "--dry-run" in sys.argv or not os.environ.get("ANTHROPIC_API_KEY")
     llm = EchoLLMClient() if dry_run else None
 

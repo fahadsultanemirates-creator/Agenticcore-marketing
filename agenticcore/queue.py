@@ -30,6 +30,23 @@ CREATE TABLE IF NOT EXISTS drafts (
 """
 
 
+# Every column a caller may hand to DraftStore.update. `id` and `created_at`
+# are deliberately absent: one identifies the row, the other is set once.
+UPDATABLE_COLUMNS = frozenset(
+    {
+        "brand_slug",
+        "channel",
+        "caption",
+        "image_path",
+        "video_path",
+        "status",
+        "telegram_chat_id",
+        "telegram_message_id",
+        "published_post_id",
+    }
+)
+
+
 @dataclass
 class PostDraft:
     id: str
@@ -120,6 +137,12 @@ class DraftStore:
     def update(self, draft_id: str, **fields) -> None:
         if not fields:
             return
+        unknown = set(fields) - UPDATABLE_COLUMNS
+        if unknown:
+            # Column names can't be bound as parameters, so they're
+            # interpolated into the statement — check them against the schema
+            # rather than trusting every caller to pass a real column.
+            raise ValueError(f"Not updatable columns: {sorted(unknown)}")
         columns = ", ".join(f"{key} = ?" for key in fields)
         values = list(fields.values()) + [draft_id]
         with closing(self._connect()) as conn:

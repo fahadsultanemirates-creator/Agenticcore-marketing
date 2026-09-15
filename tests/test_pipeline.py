@@ -116,3 +116,19 @@ def test_rejecting_a_draft_never_publishes(tmp_path):
     assert handled[0].status == "rejected"
     assert publisher.calls == []
     assert store.get(drafts[0].id).status == "rejected"
+
+
+def test_each_channel_gets_its_own_caption_naming_that_platform(tmp_path):
+    """A Facebook page must not receive the Instagram draft, or all of them."""
+
+    pipeline, _, _, _ = make_pipeline(tmp_path)
+
+    drafts = pipeline.queue_campaign("acme")
+    by_channel = {d.channel: d.caption for d in drafts}
+
+    assert by_channel["facebook"] != by_channel["instagram"]
+    assert "facebook" in by_channel["facebook"]
+    assert "instagram" in by_channel["instagram"]
+    # The caption published to one page never mentions another page's platform.
+    assert "instagram" not in by_channel["facebook"]
+    assert "facebook" not in by_channel["instagram"]

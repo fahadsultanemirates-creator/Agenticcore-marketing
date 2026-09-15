@@ -1,8 +1,10 @@
 """End-to-end flow: generate -> queue for Telegram approval -> publish.
 
     ContentPipeline.queue_campaign(brand_slug)
-        -> runs the agent orchestrator for that brand
-        -> optionally generates an image
+        -> runs the strategist once for that brand
+        -> optionally generates an image shared across its pages
+        -> drafts one post per configured channel (page), written for
+           that platform specifically
         -> creates one PostDraft per configured channel (page)
         -> sends each to Telegram with Approve/Reject buttons
 
@@ -51,8 +53,11 @@ class ContentPipeline:
             tone=brand.tone,
             channels=["social"],
         )
-        plan = self.orchestrator.run_campaign(brief)
-        caption = plan.results["social"].output
+        # One strategy for the brand, then one post per page written against
+        # it. Drafting per page costs an extra call each but is the whole
+        # point: an Instagram caption and a LinkedIn post are not the same
+        # text, and whatever lands here gets published verbatim.
+        strategy = self.orchestrator.run_strategy(brief).output
 
         image_url = None
         if self.image_generator is not None:
@@ -62,6 +67,9 @@ class ContentPipeline:
 
         drafts = []
         for target in brand.channels:
+            caption = self.orchestrator.draft_post(
+                brief, strategy, target.channel, target.label
+            ).output
             draft = self.store.create(
                 brand_slug=brand.slug,
                 channel=target.channel,

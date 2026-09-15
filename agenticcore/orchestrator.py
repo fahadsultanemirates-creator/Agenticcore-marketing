@@ -74,13 +74,45 @@ class MarketingOrchestrator:
         self.email = EmailMarketerAgent(llm)
         self.analyst = CampaignAnalystAgent(llm)
 
-    def run_campaign(self, brief: CampaignBrief) -> CampaignPlan:
-        results: Dict[str, AgentResult] = {}
+    def run_strategy(self, brief: CampaignBrief) -> AgentResult:
+        """Run only the strategist.
 
-        results["strategy"] = self.strategist.run(
+        Split out so callers that just need positioning — the publishing
+        pipeline, which then drafts one post per page — can get it without
+        paying for the copy, email, SEO, and analysis passes a full campaign
+        plan includes.
+        """
+
+        return self.strategist.run(
             task="Develop a marketing strategy and core narrative for this campaign.",
             context=asdict(brief),
         )
+
+    def draft_post(
+        self,
+        brief: CampaignBrief,
+        strategy: str,
+        platform: str,
+        label: Optional[str] = None,
+    ) -> AgentResult:
+        """Draft one publish-ready post for a single platform.
+
+        The pipeline sends this string to a page verbatim, so the task names
+        exactly one platform — that's what puts the social agent into its
+        single-post mode (see ``SocialMediaManagerAgent``).
+        """
+
+        destination = f"{label} ({platform})" if label else platform
+        return self.social.run(
+            f"Write one ready-to-publish post for {destination}. Return only the "
+            f"post copy itself.",
+            {**asdict(brief), "strategy": strategy, "platform": platform},
+        )
+
+    def run_campaign(self, brief: CampaignBrief) -> CampaignPlan:
+        results: Dict[str, AgentResult] = {}
+
+        results["strategy"] = self.run_strategy(brief)
 
         shared_context = {**asdict(brief), "strategy": results["strategy"].output}
 
@@ -90,7 +122,9 @@ class MarketingOrchestrator:
 
         if "social" in brief.channels:
             results["social"] = self.social.run(
-                "Draft platform-native social posts.", shared_context
+                "Draft platform-native social posts for LinkedIn, X (Twitter), and "
+                "Instagram — one post per platform.",
+                shared_context,
             )
         if "email" in brief.channels:
             results["email"] = self.email.run(

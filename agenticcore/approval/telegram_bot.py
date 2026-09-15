@@ -34,6 +34,11 @@ class TelegramApprovalBot:
     any chat outside ``authorized_chat_ids`` is answered with "Not
     authorized" and never yielded as a decision — so a stray or malicious
     user can never approve/reject a post, even if they guess a callback.
+
+    The allow-list fails closed. If neither ``TELEGRAM_CHAT_ID``, a
+    ``default_chat_id``, nor any brand's ``telegram_chat_id`` is configured,
+    the set is empty and *every* tap is refused — a deployment that forgot to
+    set a chat id publishes nothing instead of trusting every chat.
     """
 
     def __init__(
@@ -120,6 +125,7 @@ class TelegramApprovalBot:
 
         Taps from a chat not in ``authorized_chat_ids`` are acknowledged with
         a rejection message but never yielded, so they can't affect anything.
+        An empty allow-list yields nothing at all — see the class docstring.
         """
 
         updates = self._call("getUpdates", offset=self._offset, timeout=timeout)
@@ -130,7 +136,10 @@ class TelegramApprovalBot:
                 continue
 
             chat_id = str(callback.get("message", {}).get("chat", {}).get("id", ""))
-            if self.authorized_chat_ids and chat_id not in self.authorized_chat_ids:
+            if chat_id not in self.authorized_chat_ids:
+                # Fails closed: an empty allow-list trusts nobody, so a
+                # misconfigured deployment refuses every tap rather than
+                # accepting one from whoever found the bot first.
                 self._call("answerCallbackQuery", callback_query_id=callback["id"],
                            text="Not authorized", show_alert=True)
                 continue

@@ -18,9 +18,17 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
+
+# Run straight from a clone — "python examples/run_pipeline.py" puts this
+# file's directory on sys.path, not the repo root, so the package next door
+# would otherwise be invisible. An installed copy ("pip install -e .") takes
+# precedence; this only adds a fallback.
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from agenticcore.approval.telegram_bot import TelegramApprovalBot
 from agenticcore.brands import BrandRegistry
+from agenticcore.config import load_env
 from agenticcore.creative.base import OfflineImageGenerator
 from agenticcore.llm import EchoLLMClient
 from agenticcore.orchestrator import MarketingOrchestrator
@@ -44,6 +52,7 @@ def build_image_generator(dry_run: bool):
 
 
 def main() -> None:
+    load_env()
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     dry_run = "--dry-run" in sys.argv or not os.environ.get("ANTHROPIC_API_KEY")
     if not args:
@@ -85,11 +94,11 @@ def pipeline_preview(brand_slug, brands, orchestrator, image_generator) -> None:
         product=brand.name, audience=brand.audience, goal=brand.goal or f"Grow {brand.name}",
         tone=brand.tone, channels=["social"],
     )
-    plan = orchestrator.run_campaign(brief)
-    caption = plan.results["social"].output
+    strategy = orchestrator.run_strategy(brief).output
     image_url = image_generator.generate_image(f"Social graphic for {brand.name}") if image_generator else None
 
     for target in brand.channels:
+        caption = orchestrator.draft_post(brief, strategy, target.channel, target.label).output
         print(f"--- would send to Telegram for approval: {brand.name} -> {target.label or target.channel} ---")
         print(caption)
         if image_url:

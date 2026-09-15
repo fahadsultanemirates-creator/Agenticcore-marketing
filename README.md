@@ -41,8 +41,8 @@ with a human approval gate in between:
 brands/<slug>.json (audience, tone, goal, linked pages)
       |
       v
-MarketingOrchestrator          --> strategy + social copy (as above)
-      |
+MarketingOrchestrator          --> one strategy for the brand, then one
+      |                            post per page, written for that platform
       v
 Creative tool (optional)       --> Ideogram / Grok / HeyGen generates an image or video
       |
@@ -59,16 +59,21 @@ ContentPipeline.process_decisions()
       +--> Reject  --> marked rejected, nothing goes out
 ```
 
-Nothing publishes without a Telegram tap. Ayrshare is the publishing layer
-because it already has App Review approval with Meta/LinkedIn/X/etc. — you
-link each page once in Ayrshare's dashboard (a plain OAuth click) instead of
-running your own Meta developer app through review for every project.
+Nothing publishes without a Telegram tap, and only taps from a chat id you
+configured count — the allow-list fails closed, so a bot with no chat id set
+refuses every tap rather than trusting whoever finds it first.
+
+Ayrshare is the publishing layer because it already has App Review approval
+with Meta/LinkedIn/X/etc. — you link each page once in Ayrshare's dashboard
+(a plain OAuth click) instead of running your own Meta developer app through
+review for every project.
 
 ### Project layout
 
 ```
 agenticcore/
   llm.py                  # LLMClient protocol + Anthropic/offline backends
+  config.py                # load_env(): reads .env into os.environ
   orchestrator.py          # CampaignBrief, CampaignPlan, MarketingOrchestrator
   brands.py                # BrandProfile / BrandRegistry (one JSON file per project)
   queue.py                 # PostDraft / DraftStore (SQLite-backed approval queue)
@@ -95,10 +100,14 @@ brands/
 examples/
   run_campaign.py            # agent pipeline only, prints a Markdown plan
   run_pipeline.py             # full flow: generate -> Telegram approval -> publish
+.github/workflows/
+  tests.yml                  # runs pytest on 3.10 and 3.13, no credentials
 tests/
   test_orchestrator.py       # agent wiring, offline backend
-  test_queue.py               # DraftStore CRUD
+  test_queue.py               # DraftStore CRUD + column allow-list
   test_pipeline.py             # queueing + approve/reject, fake bot & publisher
+  test_telegram_bot.py          # approval authorization (including fail-closed)
+  test_config.py                 # .env parsing and precedence
 ```
 
 ### Setting it up for real
@@ -129,12 +138,18 @@ python examples/run_pipeline.py <your-project-slug> --dry-run  # preview only, n
 ## Quickstart
 
 ```bash
-pip install -r requirements.txt
+pip install -e ".[dev]"   # or: pip install -r requirements.txt
 cp .env.example .env      # then fill in ANTHROPIC_API_KEY
 
 python examples/run_campaign.py            # real API call if key is set
 python examples/run_campaign.py --dry-run  # always offline
 ```
+
+Both example scripts read `.env` on startup (`agenticcore.config.load_env`),
+so filling that file in is enough — no `export` needed. Real environment
+variables still win over the file. The library itself reads only
+`os.environ`, so if you import `agenticcore` from your own code, call
+`load_env()` yourself or export the keys.
 
 ## Usage
 
