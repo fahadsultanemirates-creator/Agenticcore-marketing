@@ -182,7 +182,16 @@ def test_approved_video_draft_publishes_the_video_as_media(tmp_path):
 
 
 def test_media_none_produces_text_only_posts(tmp_path):
-    pipeline, _, _, _ = make_pipeline(tmp_path, media="none")
+    # Facebook and LinkedIn both accept a text-only post; Instagram does not,
+    # which is why the default fixture's pages can't be reused here.
+    pipeline, _, _, _ = make_pipeline(
+        tmp_path,
+        media="none",
+        channels=[
+            {"channel": "facebook", "label": "Acme FB Page"},
+            {"channel": "linkedin", "label": "Acme LinkedIn"},
+        ],
+    )
 
     drafts = pipeline.queue_campaign("acme")
 
@@ -232,3 +241,70 @@ def test_trust_configured_chats_authorizes_every_brand(tmp_path):
     pipeline.trust_configured_chats()
 
     assert "-100777" in bot.authorized_chats
+
+
+def test_mixed_brand_generates_one_asset_of_each_kind_and_routes_them(tmp_path):
+    """A brand spanning YouTube and LinkedIn: one video, one graphic, right pages."""
+
+    video = FakeVideoGenerator()
+    pipeline, _, _, _ = make_pipeline(
+        tmp_path,
+        video_generator=video,
+        media="image",  # brand default
+        channels=[
+            {"channel": "linkedin", "label": "Acme LinkedIn"},
+            {"channel": "facebook", "label": "Acme FB Page"},
+            {"channel": "youtube", "label": "Acme YouTube", "media": "video"},
+            {"channel": "tiktok", "label": "Acme TikTok", "media": "video"},
+        ],
+    )
+
+    drafts = pipeline.queue_campaign("acme")
+    by_channel = {d.channel: d for d in drafts}
+
+    # One video for the two video pages, not one each.
+    assert len(video.scripts) == 1
+    assert by_channel["youtube"].video_path == by_channel["tiktok"].video_path
+    assert by_channel["youtube"].image_path is None
+
+    # The image pages get the graphic and no video.
+    assert by_channel["linkedin"].image_path is not None
+    assert by_channel["linkedin"].video_path is None
+    assert by_channel["linkedin"].image_path == by_channel["facebook"].image_path
+
+
+def test_per_page_media_overrides_the_brand_default(tmp_path):
+    video = FakeVideoGenerator()
+    pipeline, _, _, _ = make_pipeline(
+        tmp_path,
+        video_generator=video,
+        media="video",  # brand default is video
+        channels=[
+            {"channel": "linkedin", "label": "LI", "media": "image"},  # this page opts out
+            {"channel": "tiktok", "label": "TT"},                      # this one inherits
+        ],
+    )
+
+    drafts = {d.channel: d for d in pipeline.queue_campaign("acme")}
+
+    assert drafts["linkedin"].image_path is not None and drafts["linkedin"].video_path is None
+    assert drafts["tiktok"].video_path is not None and drafts["tiktok"].image_path is None
+
+
+def test_video_page_degrades_to_text_when_heygen_is_unconfigured(tmp_path):
+    """No HeyGen shouldn't stop the image pages from going out."""
+
+    pipeline, _, _, _ = make_pipeline(
+        tmp_path,
+        video_generator=None,
+        media="image",
+        channels=[
+            {"channel": "linkedin", "label": "LI"},
+            {"channel": "tiktok", "label": "TT", "media": "video"},
+        ],
+    )
+
+    drafts = {d.channel: d for d in pipeline.queue_campaign("acme")}
+
+    assert drafts["tiktok"].video_path is None and drafts["tiktok"].caption
+    assert drafts["linkedin"].image_path is not None  # unaffected

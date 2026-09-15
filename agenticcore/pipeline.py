@@ -74,19 +74,20 @@ class ContentPipeline:
         # point: an Instagram caption and a LinkedIn post are not the same
         # text, and whatever lands here gets published verbatim.
         strategy = self.orchestrator.run_strategy(brief).output
-        image_url, video_url = self._generate_media(brand, brief, strategy, image_prompt)
+        assets = self._generate_media(brand, brief, strategy, image_prompt)
 
         drafts = []
         for target in brand.channels:
             caption = self.orchestrator.draft_post(
                 brief, strategy, target.channel, target.label
             ).output
+            wanted = brand.media_for(target)
             draft = self.store.create(
                 brand_slug=brand.slug,
                 channel=target.channel,
                 caption=caption,
-                image_path=image_url,
-                video_path=video_url,
+                image_path=assets.get(MEDIA_IMAGE) if wanted == MEDIA_IMAGE else None,
+                video_path=assets.get(MEDIA_VIDEO) if wanted == MEDIA_VIDEO else None,
                 status="pending_approval",
             )
             self.store.update(draft.id, telegram_chat_id=brand.telegram_chat_id)
@@ -105,25 +106,30 @@ class ContentPipeline:
         brief: CampaignBrief,
         strategy: str,
         image_prompt: Optional[str],
-    ) -> tuple[Optional[str], Optional[str]]:
-        """Produce the one asset this brand's posts share, per its ``media``.
+    ) -> dict[str, str]:
+        """Produce each distinct asset this brand's pages ask for, once.
 
-        A brand asking for media it has no backend for gets text-only posts
-        rather than an error — an unset HEYGEN_API_KEY should cost you the
+        A brand spanning YouTube and LinkedIn needs a video and a graphic —
+        but one of each, shared by the pages that want them, not one per
+        page. Media a brand asks for with no backend configured is simply
+        absent from the result: an unset HEYGEN_API_KEY should cost you the
         video, not the campaign.
         """
 
-        if brand.media == MEDIA_VIDEO and self.video_generator is not None:
+        wanted = brand.required_media_types()
+        assets: dict[str, str] = {}
+
+        if MEDIA_VIDEO in wanted and self.video_generator is not None:
             script = self.orchestrator.draft_video_script(brief, strategy).output
-            return None, self.video_generator.generate_video(script)
+            assets[MEDIA_VIDEO] = self.video_generator.generate_video(script)
 
-        if brand.media == MEDIA_IMAGE and self.image_generator is not None:
-            prompt = image_prompt or (
-                f"Social media graphic for {brand.name}. Audience: {brand.audience}."
+        if MEDIA_IMAGE in wanted and self.image_generator is not None:
+            assets[MEDIA_IMAGE] = self.image_generator.generate_image(
+                image_prompt
+                or f"Social media graphic for {brand.name}. Audience: {brand.audience}."
             )
-            return self.image_generator.generate_image(prompt), None
 
-        return None, None
+        return assets
 
     def queue_all(self, image_prompt: Optional[str] = None) -> list[PostDraft]:
         """Run a campaign for every brand in the registry."""

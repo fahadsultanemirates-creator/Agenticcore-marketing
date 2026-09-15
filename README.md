@@ -164,21 +164,53 @@ up and waits for taps instead of generating a fresh campaign nobody asked
 for. Every brand's approval chat is authorized at startup in this mode, not
 just the one being generated for.
 
-### Choosing creative per brand
+### Choosing creative per page
 
-A brand's `"media"` field decides what its posts carry. One asset is
-generated per campaign and shared across that brand's pages, the way a
-single graphic gets reused across a Facebook page and an Instagram account —
-the captions are still written per page.
+`"media"` sets a brand-wide default; any page can override it. One brand
+usually spans both kinds — YouTube needs a video, LinkedIn wants a graphic:
+
+```json
+"media": "image",
+"channels": [
+  { "channel": "linkedin", "label": "LinkedIn Page" },
+  { "channel": "twitter",  "label": "X",       "media": "none"  },
+  { "channel": "youtube",  "label": "YouTube", "media": "video" }
+]
+```
 
 | `"media"` | Needs | Produces |
 | --- | --- | --- |
 | `"image"` (default) | `IDEOGRAM_API_KEY` or `XAI_API_KEY` | One graphic |
 | `"video"` | `HEYGEN_API_KEY` + `HEYGEN_AVATAR_ID` + `HEYGEN_VOICE_ID` | One avatar video, from a spoken script drafted separately from the captions |
-| `"none"` | nothing | Text-only posts |
+| `"none"` | nothing | Text-only post |
 
-A brand asking for creative you haven't configured a backend for degrades to
+Each distinct asset is generated **once per campaign** and shared by the
+pages that want it — a brand with two video pages and three image pages
+pays for one video and one graphic, not five assets. Captions are still
+written per page.
+
+A page asking for creative you haven't configured a backend for degrades to
 text-only and says so on startup, rather than failing the campaign.
+
+### Platform ids and their rules
+
+`"channel"` must be Ayrshare's own platform id. Two that catch people out:
+**X is `"twitter"`**, and Google Business Profile is `"gmb"`. Common wrong
+spellings are rejected at load with the id to use instead.
+
+Brand files are also checked against two platform rules before a campaign
+is generated, so a misconfiguration fails at startup rather than after
+you've approved a post:
+
+- **YouTube requires a video** — a YouTube page resolving to `image` or
+  `none` is an error.
+- **Instagram, TikTok, YouTube and Pinterest can't take text-only posts** —
+  those pages need `image` or `video`.
+
+These are deliberately conservative local guards; Ayrshare enforces the full
+per-network rules server-side and they change as the networks do. See
+[Ayrshare's social network docs](https://www.ayrshare.com/docs/apis/post/social-networks)
+for the current list.
 
 ## Quickstart
 
