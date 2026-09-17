@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS drafts (
     telegram_chat_id TEXT,
     telegram_message_id INTEGER,
     published_post_id TEXT,
+    reach_score INTEGER,
+    first_comment TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -43,6 +45,8 @@ UPDATABLE_COLUMNS = frozenset(
         "telegram_chat_id",
         "telegram_message_id",
         "published_post_id",
+        "reach_score",
+        "first_comment",
     }
 )
 
@@ -59,6 +63,8 @@ class PostDraft:
     telegram_chat_id: Optional[str] = None
     telegram_message_id: Optional[int] = None
     published_post_id: Optional[str] = None
+    reach_score: Optional[int] = None
+    first_comment: Optional[str] = None
 
     def telegram_caption(self, brand_name: str, channel_label: str) -> str:
         return f"[{brand_name} -> {channel_label}]\n\n{self.caption}"
@@ -76,6 +82,8 @@ class PostDraft:
             telegram_chat_id=row["telegram_chat_id"],
             telegram_message_id=row["telegram_message_id"],
             published_post_id=row["published_post_id"],
+            reach_score=row["reach_score"],
+            first_comment=row["first_comment"],
         )
 
 
@@ -86,7 +94,22 @@ class DraftStore:
         self.path = str(path)
         with closing(self._connect()) as conn:
             conn.execute(SCHEMA)
+            self._migrate(conn)
             conn.commit()
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Add columns introduced after a database was first created.
+
+        CREATE TABLE IF NOT EXISTS is a no-op on an existing table, so a
+        store created by an earlier version keeps its old shape until the
+        missing columns are added explicitly.
+        """
+
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(drafts)")}
+        for column, ddl in (("reach_score", "INTEGER"), ("first_comment", "TEXT")):
+            if column not in existing:
+                conn.execute(f"ALTER TABLE drafts ADD COLUMN {column} {ddl}")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)

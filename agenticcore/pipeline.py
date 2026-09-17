@@ -33,6 +33,7 @@ from agenticcore.brands import MEDIA_IMAGE, MEDIA_VIDEO
 from agenticcore.creative.base import ImageGenerator, VideoGenerator
 from agenticcore.orchestrator import CampaignBrief, MarketingOrchestrator
 from agenticcore.performance import PerformanceMemory, extract_metrics
+from agenticcore.reach import split_link
 from agenticcore.publishing.ayrshare import AyrshareClient
 from agenticcore.queue import DraftStore, PostDraft
 
@@ -49,6 +50,7 @@ class ContentPipeline:
         video_generator: Optional[VideoGenerator] = None,
         memory: Optional[PerformanceMemory] = None,
         analytics=None,
+        critique_reach: bool = True,
     ):
         self.brands = brands
         self.store = store
@@ -61,6 +63,9 @@ class ContentPipeline:
         # has been published and there is nothing to learn from yet.
         self.memory = memory
         self.analytics = analytics
+        # One extra model call per post. Left on by default because a post
+        # nobody is shown cost more to produce than the critique does.
+        self.critique_reach = critique_reach
 
     def trust_configured_chats(self) -> None:
         """Authorize every brand's approval chat up front.
@@ -96,9 +101,14 @@ class ContentPipeline:
 
         drafts = []
         for target in brand.channels:
-            caption = self.orchestrator.draft_post(
-                brief, strategy, target.channel, target.label, recent_captions=recent
-            ).output
+            caption, score = self._write_for_reach(
+                brief, strategy, target, recent, brand.primary_keyword
+            )
+            # Link placement is enforced here, not asked of the writer: the
+            # reach penalty is mechanical and a writer polishing a sentence
+            # will quietly drop a rule it was told once.
+            caption, first_comment = split_link(caption, target.channel)
+
             wanted = brand.media_for(target)
             draft = self.store.create(
                 brand_slug=brand.slug,
@@ -108,6 +118,8 @@ class ContentPipeline:
                 video_path=assets.get(MEDIA_VIDEO) if wanted == MEDIA_VIDEO else None,
                 status="pending_approval",
             )
+            self.store.update(draft.id, reach_score=score, first_comment=first_comment)
+            draft.reach_score, draft.first_comment = score, first_comment
             self.store.update(draft.id, telegram_chat_id=brand.telegram_chat_id)
             draft.telegram_chat_id = brand.telegram_chat_id
 
@@ -117,6 +129,35 @@ class ContentPipeline:
             self.store.update(draft.id, telegram_message_id=message_id)
             drafts.append(draft)
         return drafts
+
+    def _write_for_reach(
+        self,
+        brief: CampaignBrief,
+        strategy: str,
+        target,
+        recent: list[str],
+        keyword: Optional[str],
+    ) -> tuple[str, Optional[int]]:
+        """Draft a post, then let the reach critic replace a weak one.
+
+        Returns the caption to queue and the score it earned. The score is
+        stored so it can later be compared against what the post actually
+        achieved — that is what keeps the critic honest rather than a second
+        opinion nobody checks.
+        """
+
+        caption = self.orchestrator.draft_post(
+            brief, strategy, target.channel, target.label,
+            recent_captions=recent, keyword=keyword,
+        ).output
+
+        if not self.critique_reach:
+            return caption, None
+
+        verdict = self.orchestrator.critique_reach(caption, target.channel, keyword)
+        if verdict.should_revise:
+            return verdict.revised, verdict.score
+        return caption, verdict.score
 
     def _generate_media(
         self,
@@ -224,3 +265,17 @@ class ContentPipeline:
         post_id = result.get("id")
         self.store.update(draft.id, status="published", published_post_id=post_id)
         draft.status, draft.published_post_id = "published", post_id
+
+        if draft.first_comment:
+            # The link was pulled out of the body to avoid the reach penalty;
+            # it only reaches anyone if it lands as a comment. A failure here
+            # must not un-publish a post that already went out.
+            try:
+                self.publisher.comment(
+                    post_id=post_id,
+                    comment=draft.first_comment,
+                    platforms=[draft.channel],
+                    profile_key=brand.ayrshare_profile_key,
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"  first comment failed for {draft.id[:8]}: {exc}")

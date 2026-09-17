@@ -38,12 +38,19 @@ class FakeAyrshareClient:
 
     def __init__(self):
         self.calls = []
+        self.comments = []
 
     def publish(self, caption, platforms, media_urls=None, profile_key=None):
         self.calls.append(
             {"caption": caption, "platforms": platforms, "media_urls": media_urls, "profile_key": profile_key}
         )
         return {"status": "success", "id": f"fake-post-{len(self.calls)}"}
+
+    def comment(self, post_id, comment, platforms, profile_key=None):
+        self.comments.append(
+            {"post_id": post_id, "comment": comment, "platforms": platforms}
+        )
+        return {"status": "success"}
 
 
 class FakeVideoGenerator:
@@ -407,3 +414,132 @@ def test_no_history_means_no_performance_section(tmp_path):
 
     assert "BEST PERFORMING" not in drafts[0].caption
     assert drafts[0].caption
+
+
+class ScriptedCriticLLM:
+    """Echoes like EchoLLMClient, but answers the reach critic in its format."""
+
+    def __init__(self, score=4, revised="A far stronger hook line."):
+        self.score, self.revised = score, revised
+        self.critique_count = 0
+
+    def complete(self, system, prompt):
+        if "distribution analyst" in system:
+            self.critique_count += 1
+            return f"SCORE: {self.score}\nPROBLEMS:\n- weak hook\nREVISED:\n{self.revised}"
+        return f"[draft] {prompt[:120]} https://example.dev/landing"
+
+
+def _reach_pipeline(tmp_path, llm, critique=True, **brand_overrides):
+    brands = write_brand(tmp_path, **brand_overrides)
+    store = DraftStore(tmp_path / "drafts.db")
+    bot, publisher = FakeTelegramBot(), FakeAyrshareClient()
+    pipeline = ContentPipeline(
+        brands, store, MarketingOrchestrator(llm=llm), bot, publisher,
+        OfflineImageGenerator(), None, None, None, critique,
+    )
+    return pipeline, bot, publisher, store
+
+
+def test_a_weak_draft_is_replaced_by_the_critics_rewrite(tmp_path):
+    llm = ScriptedCriticLLM(score=4, revised="A far stronger hook line.")
+    pipeline, _, _, _ = _reach_pipeline(tmp_path, llm)
+
+    drafts = pipeline.queue_campaign("acme")
+
+    assert all(d.caption == "A far stronger hook line." for d in drafts)
+    assert all(d.reach_score == 4 for d in drafts)
+    assert llm.critique_count == len(drafts)  # every post is critiqued
+
+
+def test_a_strong_draft_is_kept_and_only_scored(tmp_path):
+    llm = ScriptedCriticLLM(score=9, revised="Should not be used.")
+    pipeline, _, _, _ = _reach_pipeline(tmp_path, llm)
+
+    drafts = pipeline.queue_campaign("acme")
+
+    assert all("Should not be used." not in d.caption for d in drafts)
+    assert all(d.reach_score == 9 for d in drafts)
+
+
+def test_critique_can_be_turned_off(tmp_path):
+    llm = ScriptedCriticLLM()
+    pipeline, _, _, _ = _reach_pipeline(tmp_path, llm, critique=False)
+
+    drafts = pipeline.queue_campaign("acme")
+
+    assert llm.critique_count == 0
+    assert all(d.reach_score is None for d in drafts)
+
+
+def test_link_is_pulled_from_the_body_and_posted_as_a_first_comment(tmp_path):
+    """The whole point of the split: a link in a LinkedIn body costs ~60% reach."""
+
+    llm = ScriptedCriticLLM(score=9)
+    pipeline, bot, publisher, _ = _reach_pipeline(
+        tmp_path, llm, media="none",
+        channels=[{"channel": "linkedin", "label": "Acme LinkedIn"}],
+    )
+
+    drafts = pipeline.queue_campaign("acme")
+    draft = drafts[0]
+    assert "https://example.dev/landing" not in draft.caption
+    assert draft.first_comment == "https://example.dev/landing"
+
+    bot.queue_decision(draft.id, "approve")
+    pipeline.process_decisions()
+
+    assert publisher.comments == [{
+        "post_id": "fake-post-1",
+        "comment": "https://example.dev/landing",
+        "platforms": ["linkedin"],
+    }]
+
+
+def test_a_failed_first_comment_does_not_unpublish_the_post(tmp_path):
+    llm = ScriptedCriticLLM(score=9)
+    pipeline, bot, publisher, store = _reach_pipeline(
+        tmp_path, llm, media="none",
+        channels=[{"channel": "linkedin", "label": "Acme LinkedIn"}],
+    )
+    drafts = pipeline.queue_campaign("acme")
+
+    def boom(**kwargs):
+        raise RuntimeError("comments endpoint unavailable")
+    publisher.comment = boom
+
+    bot.queue_decision(drafts[0].id, "approve")
+    handled = pipeline.process_decisions()
+
+    assert handled[0].status == "published"
+    assert store.get(drafts[0].id).published_post_id == "fake-post-1"
+
+
+def test_telegram_keeps_its_link_in_the_body(tmp_path):
+    llm = ScriptedCriticLLM(score=9)
+    pipeline, _, _, _ = _reach_pipeline(
+        tmp_path, llm, media="none",
+        channels=[{"channel": "telegram", "label": "Acme Channel"}],
+    )
+
+    draft = pipeline.queue_campaign("acme")[0]
+
+    assert "https://example.dev/landing" in draft.caption
+    assert draft.first_comment is None
+
+
+def test_the_brands_search_keyword_reaches_the_writer(tmp_path):
+    """Search reach compounds, so the keyword has to be in the copy."""
+
+    from agenticcore.llm import EchoLLMClient
+
+    pipeline, _, _, _ = _reach_pipeline(
+        tmp_path, EchoLLMClient(), critique=False,
+        keywords=["ai marketing automation"],
+        media="none",
+        channels=[{"channel": "linkedin", "label": "LI"}],
+    )
+
+    draft = pipeline.queue_campaign("acme")[0]
+
+    assert "ai marketing automation" in draft.caption  # echoed back from the prompt

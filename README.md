@@ -26,6 +26,65 @@ CampaignAnalystAgent  --> KPIs, measurement plan, cross-deliverable critique
 CampaignPlan (Markdown-renderable)
 ```
 
+## Built for reach, not for posting
+
+Filling pages is easy and worth nothing. Getting shown to people is the job,
+so the framework treats distribution mechanics as data (`agenticcore/reach.py`)
+rather than as advice buried in a prompt.
+
+### Discovery model decides everything
+
+The most consequential field per platform is how it distributes at all:
+
+| Discovery | Platforms | What it means for a new brand |
+| --- | --- | --- |
+| **Algorithmic** | TikTok, Reels, Shorts, Snapchat, Pinterest | Content is shown to non-followers on merit. **A zero-follower account can earn real reach here.** |
+| **Follower graph** | LinkedIn, Facebook, X | Distribution starts from your followers. A new page posting excellent content reaches ≈nobody — there's no first wave to reach. |
+| **Broadcast** | Telegram, WhatsApp channels | No discovery surface. Reach equals subscriber count, exactly. No writing choice changes it. |
+
+If you're launching, that table is your media plan: spend on the
+algorithmic surfaces, treat graph platforms as compounding only once an
+audience exists, and treat broadcast channels as retention — never growth.
+
+### The reach critic
+
+Every draft is scored 1-10 by a second agent (`ReachCriticAgent`) that
+judges distribution, not taste: hook inside the truncation limit, dwell and
+completion, save/share worthiness, a genuine reason to reply, link and
+hashtag mechanics, and search keyword placement. Below `REVISE_BELOW` its
+rewrite replaces the original.
+
+It's a separate pass on purpose. Asked to write well *and* optimize for
+reach at once, a model reliably does the first and trades away the second —
+the reach rules are mechanical and lose to a nicer sentence.
+
+The score is stored on the draft, so it can later be compared against what
+the post actually achieved. That's what keeps the critic falsifiable instead
+of a second opinion nobody checks.
+
+Given a competent-looking launch announcement, it scored **2/10**:
+
+> Opens with brand name + "excited to announce" — instant scroll-past.
+> Feature-list body reads as a press release, indistinguishable from any
+> competitor launch post. Link is in the post body, costing ~60% of reach.
+> 8 hashtags, far past the 1-3 limit. "Thoughts? Let us know in the
+> comments!" is engagement bait, not a real question — down-ranked.
+
+### Link placement is enforced in code
+
+An outbound link in the body costs roughly 60% of reach on LinkedIn and is
+suppressed on Facebook; on Instagram and TikTok it isn't even clickable.
+`split_link` handles this deterministically per platform — body ships clean,
+link goes out as a first comment after publishing — because a writer
+polishing a sentence will quietly drop a rule it was told once.
+
+### Social search
+
+`"keywords"` on a brand feeds the writer a phrase to work in naturally. On
+TikTok, Instagram, YouTube and Pinterest, in-platform search is a real
+discovery route, and **search reach compounds while feed reach decays within
+days** — the same post keeps being found months later.
+
 ## The feedback loop
 
 Publishing is only half a marketing system. The other half is finding out
@@ -149,6 +208,7 @@ agenticcore/
                            #   incl. the per-brand "media" toggle
   queue.py                 # PostDraft / DraftStore (SQLite-backed approval queue)
   performance.py           # metric normalizing, MetricsStore, PerformanceMemory
+  reach.py                 # per-platform reach mechanics + link policy
   pipeline.py              # ContentPipeline: wires everything below together
   agents/
     base.py                # BaseAgent, AgentResult, GROUNDING_RULES
@@ -158,6 +218,7 @@ agenticcore/
     social_media_manager.py
     email_marketer.py
     campaign_analyst.py
+    reach_critic.py        # scores a draft on distribution, rewrites weak ones
   creative/                # image/video generation backends
     ideogram.py             # Ideogram v3 image generation
     grok.py                 # xAI Grok image generation
@@ -183,6 +244,7 @@ tests/
   test_config.py                 # .env parsing and precedence
   test_agents.py                  # grounding rules reach every agent
   test_performance.py              # metric extraction, ranking, the closed loop
+  test_reach.py                     # link policy, discovery models, critic parsing
 ```
 
 ### Setting it up for real

@@ -79,6 +79,11 @@ class BrandProfile:
     ayrshare_profile_key: Optional[str] = None
     telegram_chat_id: Optional[str] = None  # overrides the global default chat
     media: str = "image"  # one of MEDIA_CHOICES; see below
+    #: Terms this brand wants to be found for in in-platform search
+    #: (TikTok, Instagram, YouTube, Pinterest). Search reach compounds
+    #: long after feed reach has decayed, so the first one is fed to the
+    #: writer as a keyword to work in naturally.
+    keywords: List[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict) -> "BrandProfile":
@@ -107,6 +112,7 @@ class BrandProfile:
             ayrshare_profile_key=data.get("ayrshare_profile_key"),
             telegram_chat_id=data.get("telegram_chat_id"),
             media=media,
+            keywords=list(data.get("keywords", [])),
         )
         profile._check_platform_media_rules()
         return profile
@@ -140,6 +146,10 @@ class BrandProfile:
                     f"{where}: {target.channel} cannot take a text-only post. "
                     f"Set \"media\" to \"image\" or \"video\" on the page."
                 )
+
+    @property
+    def primary_keyword(self) -> Optional[str]:
+        return self.keywords[0] if self.keywords else None
 
     def media_for(self, target: ChannelTarget) -> str:
         """What creative this page carries: its own setting, else the brand's."""

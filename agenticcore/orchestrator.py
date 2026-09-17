@@ -11,10 +11,13 @@ from agenticcore.agents import (
     ContentStrategistAgent,
     CopywriterAgent,
     EmailMarketerAgent,
+    ReachCriticAgent,
     SEOSpecialistAgent,
     SocialMediaManagerAgent,
 )
+from agenticcore.agents.reach_critic import ReachVerdict
 from agenticcore.llm import LLMClient, default_llm_client
+from agenticcore.reach import brief_for_agent
 
 DEFAULT_CHANNELS = ("social", "email", "seo")
 
@@ -73,6 +76,7 @@ class MarketingOrchestrator:
         self.social = SocialMediaManagerAgent(llm)
         self.email = EmailMarketerAgent(llm)
         self.analyst = CampaignAnalystAgent(llm)
+        self.reach_critic = ReachCriticAgent(llm)
 
     def run_strategy(
         self,
@@ -111,6 +115,7 @@ class MarketingOrchestrator:
         platform: str,
         label: Optional[str] = None,
         recent_captions: Optional[List[str]] = None,
+        keyword: Optional[str] = None,
     ) -> AgentResult:
         """Draft one publish-ready post for a single platform.
 
@@ -127,9 +132,21 @@ class MarketingOrchestrator:
         destination = f"{label} ({platform})" if label else platform
         task = (
             f"Write one ready-to-publish post for {destination}. Return only the "
-            f"post copy itself."
+            f"post copy itself. Obey reach_rules exactly — the point of the post "
+            f"is to be shown to people, and those rules are what decides that."
         )
-        context = {**asdict(brief), "strategy": strategy, "platform": platform}
+        context = {
+            **asdict(brief),
+            "strategy": strategy,
+            "platform": platform,
+            "reach_rules": brief_for_agent(platform),
+        }
+        if keyword:
+            context["target_search_keyword"] = keyword
+            task += (
+                f" Work the phrase '{keyword}' in naturally — it is what this "
+                f"brand wants to be found for in in-platform search."
+            )
         if recent_captions:
             context["already_published"] = "\n---\n".join(recent_captions)
             task += (
@@ -138,6 +155,18 @@ class MarketingOrchestrator:
                 "a genuinely different angle on the strategy."
             )
         return self.social.run(task, context)
+
+    def critique_reach(
+        self,
+        caption: str,
+        platform: str,
+        keyword: Optional[str] = None,
+    ) -> ReachVerdict:
+        """Score a finished draft on whether it will travel, and rewrite it."""
+
+        return self.reach_critic.critique(
+            caption, platform, brief_for_agent(platform), keyword=keyword
+        )
 
     def draft_video_script(self, brief: CampaignBrief, strategy: str) -> AgentResult:
         """Draft the words an avatar speaks in a short vertical video.
