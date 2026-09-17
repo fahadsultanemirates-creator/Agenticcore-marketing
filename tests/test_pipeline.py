@@ -308,3 +308,102 @@ def test_video_page_degrades_to_text_when_heygen_is_unconfigured(tmp_path):
 
     assert drafts["tiktok"].video_path is None and drafts["tiktok"].caption
     assert drafts["linkedin"].image_path is not None  # unaffected
+
+
+class FakeAnalytics:
+    """Returns canned analytics, and can fail for one post on purpose."""
+
+    def __init__(self, payload_by_post=None, fail_for=()):
+        self.payload_by_post = payload_by_post or {}
+        self.fail_for = set(fail_for)
+        self.calls = []
+
+    def post_analytics(self, post_id, platforms=None, profile_key=None):
+        self.calls.append((post_id, tuple(platforms or ()), profile_key))
+        if post_id in self.fail_for:
+            raise RuntimeError("upstream analytics unavailable")
+        return self.payload_by_post.get(post_id, {"impressions": 100, "likeCount": 5})
+
+
+def _pipeline_with_memory(tmp_path, analytics=None, **brand_overrides):
+    from agenticcore.performance import MetricsStore, PerformanceMemory
+
+    brands = write_brand(tmp_path, **brand_overrides)
+    store = DraftStore(tmp_path / "drafts.db")
+    metrics = MetricsStore(tmp_path / "drafts.db")
+    memory = PerformanceMemory(store, metrics)
+    bot = FakeTelegramBot()
+    publisher = FakeAyrshareClient()
+    pipeline = ContentPipeline(
+        brands, store, MarketingOrchestrator(llm=EchoLLMClient()), bot, publisher,
+        OfflineImageGenerator(), None, memory, analytics,
+    )
+    return pipeline, bot, publisher, memory
+
+
+def test_collect_metrics_records_results_against_the_right_draft(tmp_path):
+    analytics = FakeAnalytics()
+    pipeline, bot, _, memory = _pipeline_with_memory(tmp_path, analytics)
+    drafts = pipeline.queue_campaign("acme")
+    bot.queue_decision(drafts[0].id, "approve")
+    pipeline.process_decisions()
+
+    collected = pipeline.collect_metrics("acme")
+
+    assert len(collected) == 1  # only the published one
+    assert collected[0].draft_id == drafts[0].id
+    assert collected[0].impressions == 100
+    # The brand's Profile-Key and the draft's own platform are passed through.
+    assert analytics.calls[0][1] == (drafts[0].channel,)
+    assert analytics.calls[0][2] == "profile-123"
+
+
+def test_one_failing_post_does_not_stop_the_sweep(tmp_path):
+    pipeline, bot, _, _ = _pipeline_with_memory(tmp_path, FakeAnalytics())
+    drafts = pipeline.queue_campaign("acme")
+    for d in drafts:
+        bot.queue_decision(d.id, "approve")
+    pipeline.process_decisions()
+
+    published = [d for d in pipeline.store.list_for_brand("acme", status="published")]
+    doomed = published[0].published_post_id
+    pipeline.analytics = FakeAnalytics(fail_for=[doomed])
+
+    collected = pipeline.collect_metrics("acme")
+
+    assert len(collected) == len(published) - 1  # the rest still came through
+
+
+def test_results_reach_the_next_campaigns_strategy_prompt(tmp_path):
+    """The loop closing: measured posts show up in the next brief."""
+
+    from agenticcore.performance import MetricsStore, PostMetrics
+
+    pipeline, _, _, memory = _pipeline_with_memory(tmp_path, FakeAnalytics())
+    seeded = []
+    for i in range(6):
+        d = pipeline.store.create(brand_slug="acme", channel="linkedin",
+                                  caption=f"Earlier post {i}")
+        pipeline.store.update(d.id, status="published")
+        memory.metrics.record(PostMetrics(d.id, "acme", "linkedin",
+                                          impressions=1000, likes=i * 25))
+        seeded.append(d)
+
+    drafts = pipeline.queue_campaign("acme")
+
+    # EchoLLMClient echoes the prompt, so the captions prove what was sent.
+    caption = drafts[0].caption
+    assert "BEST PERFORMING" in caption
+    assert "Earlier post 5" in caption          # the winner was cited
+    assert "already_published" in caption       # anti-repetition list was sent
+
+
+def test_no_history_means_no_performance_section(tmp_path):
+    """Day one still works: nothing to learn from yet, nothing injected."""
+
+    pipeline, _, _, _ = _pipeline_with_memory(tmp_path, FakeAnalytics())
+
+    drafts = pipeline.queue_campaign("acme")
+
+    assert "BEST PERFORMING" not in drafts[0].caption
+    assert drafts[0].caption

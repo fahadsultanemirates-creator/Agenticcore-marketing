@@ -5,11 +5,18 @@ Usage:
     python examples/run_pipeline.py <slug>           # queue that brand, then listen
     python examples/run_pipeline.py --all            # queue every brand, then listen
     python examples/run_pipeline.py --listen         # listen only, generate nothing
+    python examples/run_pipeline.py --collect        # pull analytics, then exit
     python examples/run_pipeline.py <slug> --dry-run # preview, no network calls
 
 --listen is what you want after a restart: it picks up drafts queued by an
 earlier run that are still waiting on a tap, instead of generating a fresh
 campaign nobody asked for.
+
+--collect reads back how published posts performed and stores the numbers.
+Run it on a schedule (daily is plenty — posts accrue views for days, and
+each run refreshes in place). It is what closes the loop: the next campaign
+feeds those results back into the strategy, so the system gets better at
+this audience instead of starting from zero every week.
 
 Requires (unless --dry-run):
     ANTHROPIC_API_KEY     Claude API key for the marketing agents
@@ -40,6 +47,8 @@ from agenticcore.creative.base import OfflineImageGenerator, OfflineVideoGenerat
 from agenticcore.llm import EchoLLMClient
 from agenticcore.orchestrator import CampaignBrief, MarketingOrchestrator
 from agenticcore.pipeline import ContentPipeline
+from agenticcore.performance import MetricsStore, PerformanceMemory
+from agenticcore.publishing.analytics import AyrshareAnalytics
 from agenticcore.publishing.ayrshare import AyrshareClient
 from agenticcore.queue import DraftStore
 
@@ -98,9 +107,10 @@ def main() -> None:
 
     dry_run = "--dry-run" in flags or not os.environ.get("ANTHROPIC_API_KEY")
     listen_only = "--listen" in flags
+    collect_only = "--collect" in flags
     every_brand = "--all" in flags
 
-    if not args and not (listen_only or every_brand):
+    if not args and not (listen_only or every_brand or collect_only):
         print(__doc__.split("Requires")[0].strip(), file=sys.stderr)
         raise SystemExit(1)
 
@@ -110,6 +120,10 @@ def main() -> None:
     video_generator = build_video_generator(dry_run)
 
     if dry_run:
+        if collect_only:
+            print("--collect needs real credentials: it reads live analytics from "
+                  "Ayrshare and there is nothing to dry-run.", file=sys.stderr)
+            return
         if listen_only and not args and not every_brand:
             print("--listen has nothing to preview in --dry-run: it generates no "
                   "campaigns, it waits on real Telegram taps.", file=sys.stderr)
@@ -123,14 +137,28 @@ def main() -> None:
     warn_about_unmet_media(brands, video_generator, image_generator)
 
     store = DraftStore("agenticcore.db")
+    memory = PerformanceMemory(store, MetricsStore("agenticcore.db"))
     bot = TelegramApprovalBot()
     publisher = AyrshareClient()
     pipeline = ContentPipeline(
-        brands, store, orchestrator, bot, publisher, image_generator, video_generator
+        brands, store, orchestrator, bot, publisher, image_generator, video_generator,
+        memory, AyrshareAnalytics(),
     )
     # Trust every brand's chat, not just the one we generate for: in --listen
     # the taps we're waiting on belong to drafts queued by an earlier run.
     pipeline.trust_configured_chats()
+
+    if collect_only:
+        collected = pipeline.collect_metrics(args[0] if args else None)
+        if not collected:
+            print("No published posts with analytics yet.")
+            return
+        for m in sorted(collected, key=lambda m: m.engagement_rate, reverse=True):
+            print(f"  {m.summary_line()}")
+        measured = {m.brand_slug for m in collected}
+        print(f"\nRecorded {len(collected)} post(s) across {len(measured)} brand(s). "
+              f"The next campaign will use this.")
+        return
 
     if listen_only:
         waiting = pipeline.pending_drafts()

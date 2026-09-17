@@ -26,6 +26,60 @@ CampaignAnalystAgent  --> KPIs, measurement plan, cross-deliverable critique
 CampaignPlan (Markdown-renderable)
 ```
 
+## The feedback loop
+
+Publishing is only half a marketing system. The other half is finding out
+what happened and letting it change what you write next:
+
+```
+queue_campaign()  --> strategist reads the last campaign's RESULTS, not just
+      |                the brand profile; post writer reads recent captions
+      v                so it stops repeating its own hooks
+  approval --> publish
+      |
+      v
+collect_metrics()  --> Ayrshare analytics per post, normalized across
+      |                 networks, stored beside the draft that produced it
+      v
+PerformanceMemory  --> best and worst posts by engagement rate
+      |
+      +--> back into the next queue_campaign()
+```
+
+Run collection on a schedule — daily is plenty, since posts accrue views for
+days and each run refreshes in place:
+
+```bash
+python examples/run_pipeline.py --collect          # all brands
+python examples/run_pipeline.py --collect <slug>   # one brand
+```
+
+**Ranking is by engagement rate, not impressions.** A 200-follower Telegram
+channel and a 20,000-follower LinkedIn page aren't comparable on volume;
+ranking on volume would just relearn which page is biggest every week.
+
+**Nothing is injected until there is signal.** Below
+`MIN_POSTS_FOR_SIGNAL` measured posts the digest is empty — telling the
+strategist to imitate the best of two posts would bake one random result
+into the brand's voice permanently.
+
+**Each network speaks its own dialect.** YouTube reports `viewCount`,
+TikTok `videoViews`, X `impressionCount`; Facebook returns reactions as a
+`{like, love, wow}` breakdown rather than a total. `extract_metrics` pulls a
+comparable core out of any of them and keeps the raw payload alongside for
+whatever the core misses.
+
+Given real numbers, the strategist stops guessing. Fed a brand whose
+teardown posts hit 9.5% engagement and whose launch announcements hit 0.6%,
+it opened its next strategy with:
+
+> Both top posts share the same DNA: a specific, almost audit-like claim, a
+> first-person operator voice, and a diagnosis-then-fix structure. Both
+> bottom posts are announcements. This audience visibly does not care about
+> your news; they care about their broken workflow.
+
+That reasoning is unavailable to a system that only writes.
+
 ### Grounding rules
 
 Every agent's system prompt carries a shared set of grounding rules
@@ -94,6 +148,7 @@ agenticcore/
   brands.py                # BrandProfile / BrandRegistry (one JSON file per project)
                            #   incl. the per-brand "media" toggle
   queue.py                 # PostDraft / DraftStore (SQLite-backed approval queue)
+  performance.py           # metric normalizing, MetricsStore, PerformanceMemory
   pipeline.py              # ContentPipeline: wires everything below together
   agents/
     base.py                # BaseAgent, AgentResult, GROUNDING_RULES
@@ -110,6 +165,7 @@ agenticcore/
     base.py                  # ImageGenerator/VideoGenerator protocols + offline stubs
   publishing/
     ayrshare.py              # posts to your linked pages via Ayrshare
+    analytics.py              # reads back how each post performed
   approval/
     telegram_bot.py          # sends drafts to Telegram, polls Approve/Reject taps
 brands/
@@ -126,6 +182,7 @@ tests/
   test_telegram_bot.py          # approval authorization (including fail-closed)
   test_config.py                 # .env parsing and precedence
   test_agents.py                  # grounding rules reach every agent
+  test_performance.py              # metric extraction, ranking, the closed loop
 ```
 
 ### Setting it up for real

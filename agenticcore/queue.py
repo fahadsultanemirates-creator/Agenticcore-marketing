@@ -134,6 +134,27 @@ class DraftStore:
             ).fetchall()
         return [PostDraft._from_row(row) for row in rows]
 
+    def list_for_brand(
+        self,
+        brand_slug: str,
+        status: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> list["PostDraft"]:
+        """This brand's drafts, newest first, optionally filtered by status."""
+
+        sql = "SELECT * FROM drafts WHERE brand_slug = ?"
+        params: list = [brand_slug]
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        sql += " ORDER BY created_at DESC"
+        if limit:
+            sql += " LIMIT ?"
+            params.append(limit)
+        with closing(self._connect()) as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [PostDraft._from_row(row) for row in rows]
+
     def update(self, draft_id: str, **fields) -> None:
         if not fields:
             return

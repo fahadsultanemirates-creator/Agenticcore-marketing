@@ -13,6 +13,14 @@
         -> polls Telegram for button taps
         -> on Approve: publishes that one draft to that one page via Ayrshare
         -> on Reject: marks it rejected, nothing is published
+
+    ContentPipeline.collect_metrics()
+        -> reads back how published posts performed, and stores it
+
+The loop closes through PerformanceMemory: collect_metrics records results,
+and the next queue_campaign feeds the best and worst of them back into the
+strategist, plus recent captions into the post writer so it stops repeating
+itself. Without that feedback every campaign is the brand's first.
 """
 
 from __future__ import annotations
@@ -24,6 +32,7 @@ from agenticcore.brands import BrandRegistry
 from agenticcore.brands import MEDIA_IMAGE, MEDIA_VIDEO
 from agenticcore.creative.base import ImageGenerator, VideoGenerator
 from agenticcore.orchestrator import CampaignBrief, MarketingOrchestrator
+from agenticcore.performance import PerformanceMemory, extract_metrics
 from agenticcore.publishing.ayrshare import AyrshareClient
 from agenticcore.queue import DraftStore, PostDraft
 
@@ -38,6 +47,8 @@ class ContentPipeline:
         publisher: AyrshareClient,
         image_generator: Optional[ImageGenerator] = None,
         video_generator: Optional[VideoGenerator] = None,
+        memory: Optional[PerformanceMemory] = None,
+        analytics=None,
     ):
         self.brands = brands
         self.store = store
@@ -46,6 +57,10 @@ class ContentPipeline:
         self.publisher = publisher
         self.image_generator = image_generator
         self.video_generator = video_generator
+        # Optional so the pipeline still runs on day one, before any post
+        # has been published and there is nothing to learn from yet.
+        self.memory = memory
+        self.analytics = analytics
 
     def trust_configured_chats(self) -> None:
         """Authorize every brand's approval chat up front.
@@ -73,13 +88,16 @@ class ContentPipeline:
         # it. Drafting per page costs an extra call each but is the whole
         # point: an Instagram caption and a LinkedIn post are not the same
         # text, and whatever lands here gets published verbatim.
-        strategy = self.orchestrator.run_strategy(brief).output
+        digest = self.memory.strategy_digest(brand.slug) if self.memory else ""
+        recent = self.memory.recent_captions(brand.slug) if self.memory else []
+
+        strategy = self.orchestrator.run_strategy(brief, performance=digest).output
         assets = self._generate_media(brand, brief, strategy, image_prompt)
 
         drafts = []
         for target in brand.channels:
             caption = self.orchestrator.draft_post(
-                brief, strategy, target.channel, target.label
+                brief, strategy, target.channel, target.label, recent_captions=recent
             ).output
             wanted = brand.media_for(target)
             draft = self.store.create(
@@ -160,6 +178,39 @@ class ContentPipeline:
                 draft.status = "rejected"
             handled.append(draft)
         return handled
+
+    def collect_metrics(self, brand_slug: Optional[str] = None) -> list:
+        """Pull analytics for published posts and record them.
+
+        Safe to run on a schedule: a post keeps accruing views for days, so
+        each run refreshes the numbers in place rather than adding rows. One
+        post's analytics failing — a network lagging, a deleted post — never
+        stops the rest being collected.
+        """
+
+        if self.analytics is None or self.memory is None:
+            return []
+
+        slugs = [brand_slug] if brand_slug else [b.slug for b in self.brands.all()]
+        collected = []
+        for slug in slugs:
+            brand = self.brands.get(slug)
+            for draft in self.store.list_for_brand(slug, status="published"):
+                if not draft.published_post_id:
+                    continue
+                try:
+                    payload = self.analytics.post_analytics(
+                        draft.published_post_id,
+                        platforms=[draft.channel],
+                        profile_key=brand.ayrshare_profile_key,
+                    )
+                except Exception as exc:  # noqa: BLE001 - one post must not stop the sweep
+                    print(f"  analytics failed for {draft.id[:8]} ({draft.channel}): {exc}")
+                    continue
+                metrics = extract_metrics(payload, draft.id, slug, draft.channel)
+                self.memory.metrics.record(metrics)
+                collected.append(metrics)
+        return collected
 
     def _publish(self, draft: PostDraft) -> None:
         brand = self.brands.get(draft.brand_slug)

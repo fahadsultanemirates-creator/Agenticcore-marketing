@@ -74,19 +74,35 @@ class MarketingOrchestrator:
         self.email = EmailMarketerAgent(llm)
         self.analyst = CampaignAnalystAgent(llm)
 
-    def run_strategy(self, brief: CampaignBrief) -> AgentResult:
+    def run_strategy(
+        self,
+        brief: CampaignBrief,
+        performance: str = "",
+    ) -> AgentResult:
         """Run only the strategist.
 
         Split out so callers that just need positioning — the publishing
         pipeline, which then drafts one post per page — can get it without
         paying for the copy, email, SEO, and analysis passes a full campaign
         plan includes.
+
+        ``performance`` is the readout of how this brand's earlier posts did
+        (see ``agenticcore.performance``). Passing it is what makes the
+        system improve rather than restart: without it every campaign is the
+        brand's first, forever.
         """
 
-        return self.strategist.run(
-            task="Develop a marketing strategy and core narrative for this campaign.",
-            context=asdict(brief),
-        )
+        context = asdict(brief)
+        task = "Develop a marketing strategy and core narrative for this campaign."
+        if performance:
+            context["past_performance"] = performance
+            task += (
+                " Ground it in past_performance: lean into the angles and tones "
+                "that earned engagement from this audience and move away from "
+                "the ones that did not. Say briefly which past results you are "
+                "reacting to and why."
+            )
+        return self.strategist.run(task=task, context=context)
 
     def draft_post(
         self,
@@ -94,20 +110,34 @@ class MarketingOrchestrator:
         strategy: str,
         platform: str,
         label: Optional[str] = None,
+        recent_captions: Optional[List[str]] = None,
     ) -> AgentResult:
         """Draft one publish-ready post for a single platform.
 
         The pipeline sends this string to a page verbatim, so the task names
         exactly one platform — that's what puts the social agent into its
         single-post mode (see ``SocialMediaManagerAgent``).
+
+        ``recent_captions`` are this brand's last few published posts. The
+        model cannot see its own history, so without them a schedule running
+        weekly converges on the same handful of hooks — and the duplication
+        is invisible until a reader notices it before you do.
         """
 
         destination = f"{label} ({platform})" if label else platform
-        return self.social.run(
+        task = (
             f"Write one ready-to-publish post for {destination}. Return only the "
-            f"post copy itself.",
-            {**asdict(brief), "strategy": strategy, "platform": platform},
+            f"post copy itself."
         )
+        context = {**asdict(brief), "strategy": strategy, "platform": platform}
+        if recent_captions:
+            context["already_published"] = "\n---\n".join(recent_captions)
+            task += (
+                " already_published lists what this brand posted recently. Do not "
+                "reuse those hooks, opening lines, structures, or examples — take "
+                "a genuinely different angle on the strategy."
+            )
+        return self.social.run(task, context)
 
     def draft_video_script(self, brief: CampaignBrief, strategy: str) -> AgentResult:
         """Draft the words an avatar speaks in a short vertical video.
