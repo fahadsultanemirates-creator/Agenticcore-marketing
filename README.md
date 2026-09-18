@@ -67,6 +67,48 @@ searches over 45 sources and found, among others:
 That is not a topic anyone invents from a persona description. It's a real
 question with real intent behind it, and it was found rather than guessed.
 
+## Keyword territory: what to own, over months
+
+Demand research answers *what should we post this week*. Territory is the
+other axis — the whole map of questions the brand should own, worked through
+deliberately instead of by accident.
+
+```bash
+python examples/run_pipeline.py --territory agenticcore   # map the space
+python examples/run_pipeline.py --coverage agenticcore    # what is covered
+```
+
+`TerritoryAgent` searches and returns terms grouped into clusters, tagged by
+intent and funnel stage, with a priority. Each campaign then aims at the
+**highest-priority term nothing has been published against yet**, and
+coverage is recorded per page. The report shows the map:
+
+```
+Territory for agenticcore: 1/3 terms covered across 3 cluster(s)
+
+pricing — 0/1
+  [ ] p5 comm  how much does an ai automation agency cost
+trust — 1/1
+  [x] p5 info  is an ai automation agency a scam
+comparisons — 0/1
+  [ ] p4 info  ai agent vs zapier
+```
+
+Once the map is fully covered it deepens rather than stopping — the next gap
+becomes the least-covered term instead of nothing.
+
+**There is deliberately no search-volume field.** Volume needs a keyword
+tool this framework isn't connected to, and a number the model produced
+would be indistinguishable from one it looked up. `priority` is an explicit
+judgment with a stated `rationale`, and the agent is instructed never to
+imply volume, difficulty or CPC. An honest judgment beats a fabricated
+metric.
+
+`cluster_performance()` closes this loop too: once metrics exist it ranks
+clusters by engagement rate. One post doing well is noise; a cluster of
+eight consistently outperforming is a real instruction about what this
+audience wants.
+
 ## Built for reach, not for posting
 
 Filling pages is easy and worth nothing. Getting shown to people is the job,
@@ -254,6 +296,8 @@ agenticcore/
     client.py               # web-search-enabled Claude calls
     demand.py                # finds what the audience is actually asking
     opportunities.py          # ContentOpportunity + OpportunityStore
+    territory.py               # keyword map, coverage, cluster performance
+    parsing.py                  # order-independent block parsing
   pipeline.py              # ContentPipeline: wires everything below together
   agents/
     base.py                # BaseAgent, AgentResult, GROUNDING_RULES

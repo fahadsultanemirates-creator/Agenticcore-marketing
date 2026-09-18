@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from agenticcore.research.parsing import parse_fields, split_blocks
+
 OPPORTUNITY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS opportunities (
     id TEXT PRIMARY KEY,
@@ -73,36 +75,30 @@ class ContentOpportunity:
         return "\n".join(lines)
 
 
-OPPORTUNITY_BLOCK = re.compile(
-    r"QUERY:\s*(?P<query>.+?)\s*"
-    r"(?:EVIDENCE:\s*(?P<evidence>.*?)\s*)?"
-    r"(?:ANGLE:\s*(?P<angle>.*?)\s*)?"
-    r"(?:FORMAT:\s*(?P<format>.*?)\s*)?"
-    r"(?=###|QUERY:|$)",
-    re.IGNORECASE | re.DOTALL,
-)
+OPPORTUNITY_LABELS = ("QUERY", "EVIDENCE", "ANGLE", "FORMAT")
 
 
 def parse_opportunities(text: str, brand_slug: str, sources: list[str]) -> list[ContentOpportunity]:
     """Read opportunities out of the research agent's reply.
 
-    Tolerant by design: a missing EVIDENCE or ANGLE line yields an
-    opportunity with those blank rather than dropping a real finding, and a
-    reply with no QUERY line at all yields nothing rather than raising.
+    Tolerant by design: a missing EVIDENCE or ANGLE yields an opportunity
+    with those blank rather than dropping a real finding, and a reply with no
+    QUERY at all yields nothing rather than raising.
     """
 
     found = []
-    for match in OPPORTUNITY_BLOCK.finditer(text):
-        query = " ".join((match.group("query") or "").split())
-        if not query or len(query) < 8:
+    for block in split_blocks(text, "QUERY"):
+        fields = parse_fields(block, OPPORTUNITY_LABELS)
+        query = fields.get("query", "")
+        if len(query) < 8:
             continue
         found.append(ContentOpportunity(
             id=str(uuid.uuid4()),
             brand_slug=brand_slug,
             query=query,
-            evidence=" ".join((match.group("evidence") or "").split()),
-            angle=" ".join((match.group("angle") or "").split()),
-            suggested_format=" ".join((match.group("format") or "").split()).lower(),
+            evidence=fields.get("evidence", ""),
+            angle=fields.get("angle", ""),
+            suggested_format=fields.get("format", "").lower(),
             sources=list(sources),
         ))
     return found

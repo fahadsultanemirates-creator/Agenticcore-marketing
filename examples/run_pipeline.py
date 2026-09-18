@@ -7,6 +7,8 @@ Usage:
     python examples/run_pipeline.py --listen         # listen only, generate nothing
     python examples/run_pipeline.py --collect        # pull analytics, then exit
     python examples/run_pipeline.py --research <slug> # find topics worth posting about
+    python examples/run_pipeline.py --territory <slug> # map the search space to own
+    python examples/run_pipeline.py --coverage <slug>  # show what is covered and what is not
     python examples/run_pipeline.py <slug> --dry-run # preview, no network calls
 
 --listen is what you want after a restart: it picks up drafts queued by an
@@ -18,6 +20,13 @@ brand's buyers are actually asking, and queues them as content
 opportunities. Campaigns then write about a researched question instead of
 inventing a topic from the brand description. Run it weekly; each campaign
 spends one opportunity, so keep the queue stocked.
+
+--territory maps the whole query space the brand should own, clustered by
+theme and funnel stage. Each campaign then aims at the biggest uncovered
+gap, so the brand works through its territory instead of repeating one
+keyword. --coverage prints the map with what has been covered. Search reach
+compounds while feed reach decays within days; this is how you accumulate
+the first kind on purpose.
 
 --collect reads back how published posts performed and stores the numbers.
 Run it on a schedule (daily is plenty — posts accrue views for days, and
@@ -60,6 +69,8 @@ from agenticcore.publishing.ayrshare import AyrshareClient
 from agenticcore.research import (
     DemandResearchAgent,
     OpportunityStore,
+    TerritoryAgent,
+    TerritoryStore,
     default_research_client,
 )
 from agenticcore.queue import DraftStore
@@ -121,16 +132,30 @@ def main() -> None:
     listen_only = "--listen" in flags
     collect_only = "--collect" in flags
     research_only = "--research" in flags
+    territory_only = "--territory" in flags
+    coverage_only = "--coverage" in flags
     every_brand = "--all" in flags
 
-    if not args and not (listen_only or every_brand or collect_only or research_only):
+    if not args and not (listen_only or every_brand or collect_only
+                         or research_only or territory_only or coverage_only):
         print(__doc__.split("Requires")[0].strip(), file=sys.stderr)
         raise SystemExit(1)
 
     brands = BrandRegistry("brands")
 
+    if coverage_only:
+        store = TerritoryStore("agenticcore.db")
+        for slug in (args or [b.slug for b in brands.all()]):
+            print(store.coverage_report(slug))
+            print()
+        return
+
     if research_only:
         run_research(brands, args, dry_run)
+        return
+
+    if territory_only:
+        run_territory(brands, args, dry_run)
         return
 
     orchestrator = MarketingOrchestrator(llm=EchoLLMClient() if dry_run else None)
@@ -157,11 +182,12 @@ def main() -> None:
     store = DraftStore("agenticcore.db")
     memory = PerformanceMemory(store, MetricsStore("agenticcore.db"))
     opportunities = OpportunityStore("agenticcore.db")
+    territory = TerritoryStore("agenticcore.db")
     bot = TelegramApprovalBot()
     publisher = AyrshareClient()
     pipeline = ContentPipeline(
         brands, store, orchestrator, bot, publisher, image_generator, video_generator,
-        memory, AyrshareAnalytics(), True, opportunities,
+        memory, AyrshareAnalytics(), True, opportunities, territory,
     )
     # Trust every brand's chat, not just the one we generate for: in --listen
     # the taps we're waiting on belong to drafts queued by an earlier run.
@@ -238,6 +264,36 @@ def run_research(brands: BrandRegistry, args: list[str], dry_run: bool) -> None:
     total = sum(len(store.for_brand(s, status="open")) for s in slugs)
     print(f"\n{total} opportunit{'y' if total == 1 else 'ies'} queued. "
           f"Each campaign spends one.")
+
+
+def run_territory(brands: BrandRegistry, args: list[str], dry_run: bool) -> None:
+    """Map the query space this brand should own."""
+
+    if dry_run:
+        print("--territory needs ANTHROPIC_API_KEY: it runs live web searches.",
+              file=sys.stderr)
+        return
+
+    store = TerritoryStore("agenticcore.db")
+    agent = TerritoryAgent(default_research_client())
+
+    for slug in (args or [b.slug for b in brands.all()]):
+        brand = brands.get(slug)
+        existing = [t.term for t in store.for_brand(slug)]
+        print(f"Mapping {brand.name} ({len(existing)} term(s) already mapped)...")
+
+        found, result = agent.map_territory(brand, how_many=30, existing_terms=existing)
+        if not result.is_grounded:
+            print("  WARNING: no searches ran — that is the model guessing at a "
+                  "search map, which is worse than none. Not storing it.",
+                  file=sys.stderr)
+            continue
+
+        fresh = store.add_all(found)
+        print(f"  {result.searches_run} search(es) -> {len(fresh)} new term(s)")
+        print()
+        print(store.coverage_report(slug))
+        print()
 
 
 def preview(brand_slug, brands, orchestrator, image_generator, video_generator) -> None:

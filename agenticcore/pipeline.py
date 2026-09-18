@@ -34,7 +34,7 @@ from agenticcore.creative.base import ImageGenerator, VideoGenerator
 from agenticcore.orchestrator import CampaignBrief, MarketingOrchestrator
 from agenticcore.performance import PerformanceMemory, extract_metrics
 from agenticcore.reach import split_link
-from agenticcore.research import OpportunityStore
+from agenticcore.research import OpportunityStore, TerritoryStore
 from agenticcore.publishing.ayrshare import AyrshareClient
 from agenticcore.queue import DraftStore, PostDraft
 
@@ -53,6 +53,7 @@ class ContentPipeline:
         analytics=None,
         critique_reach: bool = True,
         opportunities: Optional[OpportunityStore] = None,
+        territory: Optional[TerritoryStore] = None,
     ):
         self.brands = brands
         self.store = store
@@ -71,6 +72,9 @@ class ContentPipeline:
         # Optional: without it the pipeline writes from the brand profile
         # alone, which is the publisher behaviour rather than the marketer's.
         self.opportunities = opportunities
+        # Drives the search keyword at the brand's biggest uncovered gap
+        # instead of repeating one static term on every post forever.
+        self.territory = territory
 
     def trust_configured_chats(self) -> None:
         """Authorize every brand's approval chat up front.
@@ -107,6 +111,12 @@ class ContentPipeline:
         opportunity = self.opportunities.next_open(brand.slug) if self.opportunities else None
         topic = opportunity.as_brief() if opportunity else ""
 
+        # Aim at the biggest hole in the brand's search territory. Falling
+        # back to the brand's own keyword keeps this working before any
+        # territory is mapped.
+        gap = self.territory.next_gap(brand.slug) if self.territory else None
+        keyword = gap.term if gap else brand.primary_keyword
+
         strategy = self.orchestrator.run_strategy(
             brief, performance=digest, topic=topic
         ).output
@@ -115,7 +125,7 @@ class ContentPipeline:
         drafts = []
         for target in brand.channels:
             caption, score = self._write_for_reach(
-                brief, strategy, target, recent, brand.primary_keyword, topic
+                brief, strategy, target, recent, keyword, topic
             )
             # Link placement is enforced here, not asked of the writer: the
             # reach penalty is mechanical and a writer polishing a sentence
@@ -147,6 +157,9 @@ class ContentPipeline:
         # silently burning a researched topic nothing was published about.
         if opportunity and drafts:
             self.opportunities.mark_used(opportunity.id, draft_id=drafts[0].id)
+        if gap and drafts:
+            for draft in drafts:
+                self.territory.record_coverage(draft.id, gap.id, brand.slug)
         return drafts
 
     def _write_for_reach(

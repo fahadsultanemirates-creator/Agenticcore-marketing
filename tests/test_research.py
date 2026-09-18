@@ -171,3 +171,148 @@ def test_as_brief_tells_the_writer_what_to_answer_and_not_to_embellish():
     assert "what does it cost" in text
     assert "give real numbers" in text
     assert "do not embellish" in text
+
+
+# --- keyword territory ---
+
+TERRITORY_REPLY = """### TERM
+TERM: how much does an ai automation agency cost
+CLUSTER: pricing
+INTENT: commercial
+STAGE: consideration
+PRIORITY: 5
+WHY: Every competitor answers it with "contact us".
+
+### TERM
+TERM: ai agent vs zapier
+PRIORITY: 4
+CLUSTER: comparisons
+INTENT: informational
+STAGE: awareness
+
+### TERM
+TERM: is an ai automation agency a scam
+CLUSTER: trust
+PRIORITY: 3
+STAGE: awareness
+"""
+
+
+def test_territory_parses_regardless_of_field_order():
+    """Models reorder fields freely; position must not carry meaning."""
+
+    from agenticcore.research import parse_territory
+
+    targets = {t.term: t for t in parse_territory(TERRITORY_REPLY, "ac", [])}
+
+    zapier = targets["ai agent vs zapier"]
+    assert zapier.priority == 4          # PRIORITY came before CLUSTER
+    assert zapier.cluster == "comparisons"
+    assert zapier.intent == "informational"
+
+
+def test_territory_defaults_fill_missing_fields():
+    from agenticcore.research import parse_territory
+
+    t = parse_territory("TERM: something people search for\n", "ac", [])[0]
+
+    assert (t.cluster, t.intent, t.stage, t.priority) == (
+        "general", "informational", "awareness", 3)
+
+
+def test_territory_rejects_out_of_vocabulary_values():
+    from agenticcore.research import parse_territory
+
+    t = parse_territory(
+        "TERM: a real search term\nINTENT: vibes\nSTAGE: whenever\nPRIORITY: 99\n",
+        "ac", [])[0]
+
+    assert t.intent == "informational" and t.stage == "awareness"
+    assert t.priority == 5  # clamped, not 99
+
+
+def _territory(tmp_path):
+    from agenticcore.research import TerritoryStore, parse_territory
+
+    store = TerritoryStore(tmp_path / "t.db")
+    store.add_all(parse_territory(TERRITORY_REPLY, "ac", ["https://s.test"]))
+    return store
+
+
+def test_next_gap_takes_the_highest_priority_uncovered_term(tmp_path):
+    store = _territory(tmp_path)
+
+    assert store.next_gap("ac").term == "how much does an ai automation agency cost"
+
+
+def test_covering_a_term_moves_the_gap_on(tmp_path):
+    store = _territory(tmp_path)
+    first = store.next_gap("ac")
+
+    store.record_coverage("draft-1", first.id, "ac")
+
+    assert store.next_gap("ac").term == "ai agent vs zapier"
+
+
+def test_a_fully_covered_map_deepens_instead_of_stopping(tmp_path):
+    store = _territory(tmp_path)
+    for i, t in enumerate(store.for_brand("ac")):
+        store.record_coverage(f"draft-{i}", t.id, "ac")
+    # Cover the top term a second time so it is no longer the least-covered.
+    top = [t for t in store.for_brand("ac") if t.priority == 5][0]
+    store.record_coverage("draft-extra", top.id, "ac")
+
+    gap = store.next_gap("ac")
+
+    assert gap is not None
+    assert gap.times_covered == 1  # the least-covered, not the highest priority
+
+
+def test_duplicate_terms_are_not_remapped(tmp_path):
+    from agenticcore.research import parse_territory
+
+    store = _territory(tmp_path)
+
+    fresh = store.add_all(parse_territory(TERRITORY_REPLY, "ac", []))
+
+    assert fresh == []
+    assert len(store.for_brand("ac")) == 3
+
+
+def test_coverage_report_groups_by_cluster_and_counts(tmp_path):
+    store = _territory(tmp_path)
+    store.record_coverage("d1", store.next_gap("ac").id, "ac")
+
+    report = store.coverage_report("ac")
+
+    assert "1/3 terms covered" in report
+    assert "pricing" in report and "comparisons" in report and "trust" in report
+
+
+def test_cluster_performance_ranks_clusters_not_posts(tmp_path):
+    """One good post is noise; a cluster that consistently wins is an instruction."""
+
+    from agenticcore.performance import PostMetrics
+    from agenticcore.research import cluster_performance
+
+    store = _territory(tmp_path)
+    targets = store.for_brand("ac")
+    pricing = next(t for t in targets if t.cluster == "pricing")
+    comparisons = next(t for t in targets if t.cluster == "comparisons")
+
+    metrics = {
+        "d1": PostMetrics("d1", "ac", "linkedin", impressions=1000, likes=100),
+        "d2": PostMetrics("d2", "ac", "linkedin", impressions=1000, likes=10),
+    }
+    report = cluster_performance(
+        targets, metrics, [("d1", pricing.id), ("d2", comparisons.id)]
+    )
+
+    assert report.index("pricing") < report.index("comparisons")  # ranked best first
+    assert "10.0%" in report and "1.0%" in report
+
+
+def test_cluster_performance_is_empty_before_any_results(tmp_path):
+    from agenticcore.research import cluster_performance
+
+    assert cluster_performance(_territory(tmp_path).for_brand("ac"), {}, []) == ""

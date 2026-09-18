@@ -621,3 +621,61 @@ def test_without_an_opportunity_store_nothing_changes(tmp_path):
     drafts = pipeline.queue_campaign("acme")
 
     assert drafts and all(d.caption for d in drafts)
+
+
+def test_each_post_targets_the_next_gap_in_the_territory(tmp_path):
+    """Instead of repeating one static brand keyword on every post forever."""
+
+    from agenticcore.research import TerritoryStore, parse_territory
+
+    brands = write_brand(tmp_path, media="none", keywords=["static brand keyword"],
+                         channels=[{"channel": "linkedin", "label": "LI"}])
+    store = DraftStore(tmp_path / "d.db")
+    territory = TerritoryStore(tmp_path / "d.db")
+    territory.add_all(parse_territory(
+        "### TERM\nTERM: how much does an ai agency cost\nPRIORITY: 5\n"
+        "### TERM\nTERM: ai agent vs zapier\nPRIORITY: 4\n", "acme", []))
+
+    pipeline = ContentPipeline(
+        brands, store, MarketingOrchestrator(llm=EchoLLMClient()),
+        FakeTelegramBot(), FakeAyrshareClient(), OfflineImageGenerator(),
+        None, None, None, False, None, territory,
+    )
+
+    first = pipeline.queue_campaign("acme")
+    second = pipeline.queue_campaign("acme")
+
+    # EchoLLMClient reflects the prompt, so the caption shows the keyword used.
+    assert "how much does an ai agency cost" in first[0].caption
+    assert "ai agent vs zapier" in second[0].caption
+    assert "static brand keyword" not in first[0].caption
+
+
+def test_coverage_is_recorded_for_every_page_of_the_campaign(tmp_path):
+    from agenticcore.research import TerritoryStore, parse_territory
+
+    brands = write_brand(tmp_path, media="none", channels=[
+        {"channel": "linkedin", "label": "LI"},
+        {"channel": "facebook", "label": "FB"},
+    ])
+    store = DraftStore(tmp_path / "d.db")
+    territory = TerritoryStore(tmp_path / "d.db")
+    territory.add_all(parse_territory("TERM: how much does an ai agency cost\n", "acme", []))
+
+    pipeline = ContentPipeline(
+        brands, store, MarketingOrchestrator(llm=EchoLLMClient()),
+        FakeTelegramBot(), FakeAyrshareClient(), OfflineImageGenerator(),
+        None, None, None, False, None, territory,
+    )
+    drafts = pipeline.queue_campaign("acme")
+
+    covered = territory.for_brand("acme")[0]
+    assert covered.times_covered == len(drafts) == 2
+
+
+def test_no_territory_falls_back_to_the_brand_keyword(tmp_path):
+    pipeline, _, _, _ = make_pipeline(tmp_path, keywords=["ai marketing automation"])
+
+    drafts = pipeline.queue_campaign("acme")
+
+    assert "ai marketing automation" in drafts[0].caption
