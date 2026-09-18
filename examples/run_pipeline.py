@@ -6,11 +6,18 @@ Usage:
     python examples/run_pipeline.py --all            # queue every brand, then listen
     python examples/run_pipeline.py --listen         # listen only, generate nothing
     python examples/run_pipeline.py --collect        # pull analytics, then exit
+    python examples/run_pipeline.py --research <slug> # find topics worth posting about
     python examples/run_pipeline.py <slug> --dry-run # preview, no network calls
 
 --listen is what you want after a restart: it picks up drafts queued by an
 earlier run that are still waiting on a tap, instead of generating a fresh
 campaign nobody asked for.
+
+--research goes and looks: it searches the live web for the questions this
+brand's buyers are actually asking, and queues them as content
+opportunities. Campaigns then write about a researched question instead of
+inventing a topic from the brand description. Run it weekly; each campaign
+spends one opportunity, so keep the queue stocked.
 
 --collect reads back how published posts performed and stores the numbers.
 Run it on a schedule (daily is plenty — posts accrue views for days, and
@@ -50,6 +57,11 @@ from agenticcore.pipeline import ContentPipeline
 from agenticcore.performance import MetricsStore, PerformanceMemory
 from agenticcore.publishing.analytics import AyrshareAnalytics
 from agenticcore.publishing.ayrshare import AyrshareClient
+from agenticcore.research import (
+    DemandResearchAgent,
+    OpportunityStore,
+    default_research_client,
+)
 from agenticcore.queue import DraftStore
 
 
@@ -108,13 +120,19 @@ def main() -> None:
     dry_run = "--dry-run" in flags or not os.environ.get("ANTHROPIC_API_KEY")
     listen_only = "--listen" in flags
     collect_only = "--collect" in flags
+    research_only = "--research" in flags
     every_brand = "--all" in flags
 
-    if not args and not (listen_only or every_brand or collect_only):
+    if not args and not (listen_only or every_brand or collect_only or research_only):
         print(__doc__.split("Requires")[0].strip(), file=sys.stderr)
         raise SystemExit(1)
 
     brands = BrandRegistry("brands")
+
+    if research_only:
+        run_research(brands, args, dry_run)
+        return
+
     orchestrator = MarketingOrchestrator(llm=EchoLLMClient() if dry_run else None)
     image_generator = build_image_generator(dry_run)
     video_generator = build_video_generator(dry_run)
@@ -138,11 +156,12 @@ def main() -> None:
 
     store = DraftStore("agenticcore.db")
     memory = PerformanceMemory(store, MetricsStore("agenticcore.db"))
+    opportunities = OpportunityStore("agenticcore.db")
     bot = TelegramApprovalBot()
     publisher = AyrshareClient()
     pipeline = ContentPipeline(
         brands, store, orchestrator, bot, publisher, image_generator, video_generator,
-        memory, AyrshareAnalytics(),
+        memory, AyrshareAnalytics(), True, opportunities,
     )
     # Trust every brand's chat, not just the one we generate for: in --listen
     # the taps we're waiting on belong to drafts queued by an earlier run.
@@ -179,6 +198,46 @@ def main() -> None:
         still_waiting = len(pipeline.pending_drafts())
         print(f"\nStopped. {still_waiting} draft(s) still pending — "
               f"resume with: python examples/run_pipeline.py --listen")
+
+
+def run_research(brands: BrandRegistry, args: list[str], dry_run: bool) -> None:
+    """Find and queue what this brand's audience is actually asking."""
+
+    if dry_run:
+        print("--research needs ANTHROPIC_API_KEY: it runs live web searches.",
+              file=sys.stderr)
+        return
+
+    store = OpportunityStore("agenticcore.db")
+    agent = DemandResearchAgent(default_research_client())
+    slugs = args or [b.slug for b in brands.all()]
+
+    for slug in slugs:
+        brand = brands.get(slug)
+        covered = [o.query for o in store.for_brand(slug)]
+        print(f"Researching {brand.name} ({len(covered)} topic(s) already known)...")
+
+        found, result = agent.find(brand, how_many=6, already_covered=covered)
+        if not result.is_grounded:
+            print("  WARNING: no searches ran — this answer is the model guessing, "
+                  "not research. Not queueing it.", file=sys.stderr)
+            continue
+        if not found:
+            print("  Nothing new worth posting about. That is a real answer, "
+                  "not a failure.")
+            continue
+
+        fresh = store.add_all(found)
+        print(f"  {result.searches_run} search(es), {len(result.sources)} source(s) "
+              f"-> {len(fresh)} new opportunit{'y' if len(fresh) == 1 else 'ies'}:")
+        for o in fresh:
+            print(f"    - {o.query}")
+            if o.angle:
+                print(f"      angle: {o.angle}")
+
+    total = sum(len(store.for_brand(s, status="open")) for s in slugs)
+    print(f"\n{total} opportunit{'y' if total == 1 else 'ies'} queued. "
+          f"Each campaign spends one.")
 
 
 def preview(brand_slug, brands, orchestrator, image_generator, video_generator) -> None:

@@ -26,6 +26,47 @@ CampaignAnalystAgent  --> KPIs, measurement plan, cross-deliverable critique
 CampaignPlan (Markdown-renderable)
 ```
 
+## Research: deciding what to say
+
+A publisher is handed a brand description and invents a topic. A marketer
+finds out what the audience is actually asking, then answers it. That is the
+whole difference, and it's what `agenticcore/research/` adds.
+
+```bash
+python examples/run_pipeline.py --research agenticcore   # search, queue topics
+python examples/run_pipeline.py agenticcore              # write about the next one
+```
+
+`DemandResearchAgent` runs live web searches via Claude's server-side search
+tool — no separate search vendor or key — and returns **content
+opportunities**: a real question in the audience's own words, evidence of
+where it's being asked, why it's under-answered, and the angle this brand
+should take.
+
+Opportunities are stored and **consumed**. Each campaign spends one and
+marks it used, so the brand works through its territory instead of circling
+the same three ideas. Weekly research passes the already-known queries back
+in, so it pushes into new ground rather than resurfacing evergreens.
+
+Two refusals are built in, because the failure this role exists to prevent
+is inventing topics that merely sound plausible:
+
+- The agent may answer `NO OPPORTUNITIES FOUND`. That's treated as a valid
+  result, not an error.
+- `ResearchResult.is_grounded` reports whether searches actually ran. An
+  ungrounded answer is a guess wearing the costume of research, and the CLI
+  refuses to queue one.
+
+Run live against an AI-automation-agency profile, it came back with six
+searches over 45 sources and found, among others:
+
+> **"Is [this] AI automation agency a scam?"** — *Search `ai automation
+> agency scam reddit` and the anger is immediate.* Angle: draw the line
+> between guru-course scams and real delivery work, naming the red flags.
+
+That is not a topic anyone invents from a persona description. It's a real
+question with real intent behind it, and it was found rather than guessed.
+
 ## Built for reach, not for posting
 
 Filling pages is easy and worth nothing. Getting shown to people is the job,
@@ -209,6 +250,10 @@ agenticcore/
   queue.py                 # PostDraft / DraftStore (SQLite-backed approval queue)
   performance.py           # metric normalizing, MetricsStore, PerformanceMemory
   reach.py                 # per-platform reach mechanics + link policy
+  research/
+    client.py               # web-search-enabled Claude calls
+    demand.py                # finds what the audience is actually asking
+    opportunities.py          # ContentOpportunity + OpportunityStore
   pipeline.py              # ContentPipeline: wires everything below together
   agents/
     base.py                # BaseAgent, AgentResult, GROUNDING_RULES
@@ -245,6 +290,7 @@ tests/
   test_agents.py                  # grounding rules reach every agent
   test_performance.py              # metric extraction, ranking, the closed loop
   test_reach.py                     # link policy, discovery models, critic parsing
+  test_research.py                   # opportunity parsing, dedupe, consumption
 ```
 
 ### Setting it up for real

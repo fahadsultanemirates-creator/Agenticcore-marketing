@@ -82,6 +82,7 @@ class MarketingOrchestrator:
         self,
         brief: CampaignBrief,
         performance: str = "",
+        topic: str = "",
     ) -> AgentResult:
         """Run only the strategist.
 
@@ -98,6 +99,14 @@ class MarketingOrchestrator:
 
         context = asdict(brief)
         task = "Develop a marketing strategy and core narrative for this campaign."
+        if topic:
+            context["researched_topic"] = topic
+            task = (
+                "Build the campaign around researched_topic — a question this "
+                "audience was found asking, not a theme we chose. The campaign "
+                "exists to answer it better than anyone currently does. Do not "
+                "drift to a more comfortable adjacent subject."
+            )
         if performance:
             context["past_performance"] = performance
             task += (
@@ -116,6 +125,7 @@ class MarketingOrchestrator:
         label: Optional[str] = None,
         recent_captions: Optional[List[str]] = None,
         keyword: Optional[str] = None,
+        topic: str = "",
     ) -> AgentResult:
         """Draft one publish-ready post for a single platform.
 
@@ -141,6 +151,13 @@ class MarketingOrchestrator:
             "platform": platform,
             "reach_rules": brief_for_agent(platform),
         }
+        if topic:
+            context["researched_topic"] = topic
+            task += (
+                " This post answers researched_topic — a real question this "
+                "audience asks. Answer it directly and usefully enough that "
+                "someone would save the post."
+            )
         if keyword:
             context["target_search_keyword"] = keyword
             task += (

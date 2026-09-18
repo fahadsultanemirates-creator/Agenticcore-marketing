@@ -543,3 +543,81 @@ def test_the_brands_search_keyword_reaches_the_writer(tmp_path):
     draft = pipeline.queue_campaign("acme")[0]
 
     assert "ai marketing automation" in draft.caption  # echoed back from the prompt
+
+
+def _pipeline_with_opportunities(tmp_path, blocks, **brand_overrides):
+    from agenticcore.research import OpportunityStore, parse_opportunities
+
+    # Text-capable pages: Instagram can't take a text-only post, so the
+    # default fixture's page set is rejected by the brand media guard.
+    brand_overrides.setdefault("channels", [
+        {"channel": "linkedin", "label": "Acme LinkedIn"},
+        {"channel": "facebook", "label": "Acme FB Page"},
+    ])
+    brands = write_brand(tmp_path, **brand_overrides)
+    store = DraftStore(tmp_path / "drafts.db")
+    ops = OpportunityStore(tmp_path / "drafts.db")
+    ops.add_all(parse_opportunities(blocks, "acme", ["https://src.test"]))
+    bot, publisher = FakeTelegramBot(), FakeAyrshareClient()
+    pipeline = ContentPipeline(
+        brands, store, MarketingOrchestrator(llm=EchoLLMClient()), bot, publisher,
+        OfflineImageGenerator(), None, None, None, False, ops,
+    )
+    return pipeline, ops
+
+
+RESEARCHED = """### OPPORTUNITY
+QUERY: how much does an AI automation agency actually cost
+EVIDENCE: Asked constantly; every agency site says contact us.
+ANGLE: Publish real ranges.
+FORMAT: post
+
+### OPPORTUNITY
+QUERY: who owns the code when the project ends
+EVIDENCE: Top vetting question in buyer guides.
+ANGLE: State terms before being asked.
+FORMAT: post
+"""
+
+
+def test_the_campaign_is_written_about_the_researched_question(tmp_path):
+    pipeline, _ = _pipeline_with_opportunities(tmp_path, RESEARCHED, media="none")
+
+    drafts = pipeline.queue_campaign("acme")
+
+    # EchoLLMClient reflects the prompt, so the caption proves what was sent.
+    assert "how much does an AI automation agency actually cost" in drafts[0].caption
+    assert "do not embellish" in drafts[0].caption
+
+
+def test_using_an_opportunity_spends_it_so_the_next_campaign_moves_on(tmp_path):
+    from agenticcore.research import STATUS_USED
+
+    pipeline, ops = _pipeline_with_opportunities(tmp_path, RESEARCHED, media="none")
+
+    first = pipeline.queue_campaign("acme")
+    second = pipeline.queue_campaign("acme")
+
+    assert "how much does an AI automation agency" in first[0].caption
+    assert "who owns the code" in second[0].caption
+    used = ops.for_brand("acme", status=STATUS_USED)
+    assert len(used) == 2
+    assert used[0].used_by_draft == first[0].id
+
+
+def test_an_empty_queue_still_produces_a_campaign(tmp_path):
+    """Day one, or a spent territory: fall back rather than fail."""
+
+    pipeline, _ = _pipeline_with_opportunities(tmp_path, "", media="none")
+
+    drafts = pipeline.queue_campaign("acme")
+
+    assert drafts and all(d.caption for d in drafts)
+
+
+def test_without_an_opportunity_store_nothing_changes(tmp_path):
+    pipeline, _, _, _ = make_pipeline(tmp_path)
+
+    drafts = pipeline.queue_campaign("acme")
+
+    assert drafts and all(d.caption for d in drafts)

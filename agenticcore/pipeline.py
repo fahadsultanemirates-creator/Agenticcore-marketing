@@ -34,6 +34,7 @@ from agenticcore.creative.base import ImageGenerator, VideoGenerator
 from agenticcore.orchestrator import CampaignBrief, MarketingOrchestrator
 from agenticcore.performance import PerformanceMemory, extract_metrics
 from agenticcore.reach import split_link
+from agenticcore.research import OpportunityStore
 from agenticcore.publishing.ayrshare import AyrshareClient
 from agenticcore.queue import DraftStore, PostDraft
 
@@ -51,6 +52,7 @@ class ContentPipeline:
         memory: Optional[PerformanceMemory] = None,
         analytics=None,
         critique_reach: bool = True,
+        opportunities: Optional[OpportunityStore] = None,
     ):
         self.brands = brands
         self.store = store
@@ -66,6 +68,9 @@ class ContentPipeline:
         # One extra model call per post. Left on by default because a post
         # nobody is shown cost more to produce than the critique does.
         self.critique_reach = critique_reach
+        # Optional: without it the pipeline writes from the brand profile
+        # alone, which is the publisher behaviour rather than the marketer's.
+        self.opportunities = opportunities
 
     def trust_configured_chats(self) -> None:
         """Authorize every brand's approval chat up front.
@@ -96,13 +101,21 @@ class ContentPipeline:
         digest = self.memory.strategy_digest(brand.slug) if self.memory else ""
         recent = self.memory.recent_captions(brand.slug) if self.memory else []
 
-        strategy = self.orchestrator.run_strategy(brief, performance=digest).output
+        # Write about a researched question if one is queued. Falling back to
+        # the brand profile keeps day one working, but an empty queue means
+        # the campaign is guessing — run research to refill it.
+        opportunity = self.opportunities.next_open(brand.slug) if self.opportunities else None
+        topic = opportunity.as_brief() if opportunity else ""
+
+        strategy = self.orchestrator.run_strategy(
+            brief, performance=digest, topic=topic
+        ).output
         assets = self._generate_media(brand, brief, strategy, image_prompt)
 
         drafts = []
         for target in brand.channels:
             caption, score = self._write_for_reach(
-                brief, strategy, target, recent, brand.primary_keyword
+                brief, strategy, target, recent, brand.primary_keyword, topic
             )
             # Link placement is enforced here, not asked of the writer: the
             # reach penalty is mechanical and a writer polishing a sentence
@@ -128,6 +141,12 @@ class ContentPipeline:
             )
             self.store.update(draft.id, telegram_message_id=message_id)
             drafts.append(draft)
+
+        # Spend the opportunity only once posts exist for it, so a failure
+        # part-way through leaves it open for the next run rather than
+        # silently burning a researched topic nothing was published about.
+        if opportunity and drafts:
+            self.opportunities.mark_used(opportunity.id, draft_id=drafts[0].id)
         return drafts
 
     def _write_for_reach(
@@ -137,6 +156,7 @@ class ContentPipeline:
         target,
         recent: list[str],
         keyword: Optional[str],
+        topic: str = "",
     ) -> tuple[str, Optional[int]]:
         """Draft a post, then let the reach critic replace a weak one.
 
@@ -148,7 +168,7 @@ class ContentPipeline:
 
         caption = self.orchestrator.draft_post(
             brief, strategy, target.channel, target.label,
-            recent_captions=recent, keyword=keyword,
+            recent_captions=recent, keyword=keyword, topic=topic,
         ).output
 
         if not self.critique_reach:
