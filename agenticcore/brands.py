@@ -73,6 +73,11 @@ class BrandProfile:
     slug: str
     name: str
     audience: str
+    #: What the business actually does, in plain words. The research agents
+    #: lead with this — without it they describe the brand by its goal
+    #: ("book discovery calls"), which tells them almost nothing about what
+    #: to search for.
+    description: str = ""
     goal: str = ""
     tone: str = "confident and clear"
     channels: List[ChannelTarget] = field(default_factory=list)
@@ -84,6 +89,13 @@ class BrandProfile:
     #: long after feed reach has decayed, so the first one is fed to the
     #: writer as a keyword to work in naturally.
     keywords: List[str] = field(default_factory=list)
+    #: Appended verbatim to every post for this brand. For rules that are
+    #: not negotiable — a regulator's required wording, for instance — a
+    #: model that remembers it most of the time is not good enough.
+    disclaimer: str = ""
+    #: Claims this brand must never make, passed to every writing agent on
+    #: top of the standard grounding rules.
+    forbidden_claims: List[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict) -> "BrandProfile":
@@ -106,6 +118,7 @@ class BrandProfile:
             slug=slug,
             name=data["name"],
             audience=data["audience"],
+            description=data.get("description", ""),
             goal=data.get("goal", ""),
             tone=data.get("tone", "confident and clear"),
             channels=channels,
@@ -113,6 +126,8 @@ class BrandProfile:
             telegram_chat_id=data.get("telegram_chat_id"),
             media=media,
             keywords=list(data.get("keywords", [])),
+            disclaimer=data.get("disclaimer", ""),
+            forbidden_claims=list(data.get("forbidden_claims", [])),
         )
         profile._check_platform_media_rules()
         return profile

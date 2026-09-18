@@ -1,0 +1,34 @@
+{
+  "slug": "mmcore",
+  "name": "M&MCore",
+
+  "description": "The value-priced sister site of AgenticCore, under the same umbrella and the same AI-run delivery model, with one simplified tier per service and no premium markup. Real prices starting at $32. Sites, branding, marketing and bookkeeping, plus a Starter Package bundling a landing page, a batch of social posts, branded documents and a feasibility + marketing report at one fixed price. Two named verticals on the homepage: social media marketing for real estate agents and brokerages, and an AI trading bot with built-in risk control for Forex and crypto.",
+
+  "audience": "Price-sensitive real estate agents and small brokerages, and first-time founders who want something live cheaply. Global, weighted to India, Pakistan and the Gulf where the price point matters most.",
+
+  "goal": "Drive signups to the fixed-price starter tiers",
+
+  "tone": "direct and unpretentious. Leads with the price and what you get for it. Never apologises for being the cheaper option — treats transparent pricing as the advantage it is.",
+
+  "media": "image",
+
+  "keywords": [
+    "cheap social media marketing for real estate agents",
+    "affordable website for small business",
+    "real estate marketing packages"
+  ],
+
+  "forbidden_claims": [
+    "any guaranteed result, ranking, lead volume or return",
+    "any profit, yield or performance claim about the trading bot",
+    "named clients, case studies or testimonials — there are none yet",
+    "describing the trading bot as advice, signals, or a recommendation to buy or sell"
+  ],
+
+  "ayrshare_profile_key": null,
+  "telegram_chat_id": null,
+
+  "channels": [
+    { "channel": "linkedin", "label": "M&MCore LinkedIn", "media": "none" }
+  ]
+}

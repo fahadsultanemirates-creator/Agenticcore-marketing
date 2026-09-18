@@ -1,0 +1,35 @@
+{
+  "slug": "agenticcore",
+  "name": "AgenticCore",
+
+  "description": "A done-for-you agency where AI agents plan, build and run the work: custom websites, branding, marketing, bookkeeping and reports, plus feasibility and audits. Also builds custom AI agent frameworks to a client's own strategy — the client owns the strategy, AgenticCore builds the system. Packages bundle a landing site, social content, branded documents and a feasibility + marketing report from $150. Its marketing arm (agenticcore.biz) specialises in complete campaigns for real estate developers. Everything is fixed-price and quoted before any payment.",
+
+  "audience": "Real estate developers, agents and brokerages who need marketing and systems built for them, plus founders launching a business from scratch with no setup yet. Global, weighted to markets with the most demand — India, Pakistan and the Gulf.",
+
+  "goal": "Get the right people to the signup page, or into the Telegram/WhatsApp chat",
+
+  "tone": "plain, concrete, no hype. Explains the mechanism rather than selling the outcome. Confident without claiming credentials it does not have.",
+
+  "media": "image",
+
+  "keywords": [
+    "marketing for real estate developers",
+    "real estate social media marketing",
+    "ai agents for business",
+    "ai automation agency"
+  ],
+
+  "forbidden_claims": [
+    "any guaranteed result, ranking, lead volume or return",
+    "named clients, case studies, testimonials or years in business — there are none yet",
+    "any statistic about AgenticCore's own performance",
+    "claiming to be an established or award-winning agency"
+  ],
+
+  "ayrshare_profile_key": null,
+  "telegram_chat_id": null,
+
+  "channels": [
+    { "channel": "linkedin", "label": "AgenticCore LinkedIn", "media": "none" }
+  ]
+}

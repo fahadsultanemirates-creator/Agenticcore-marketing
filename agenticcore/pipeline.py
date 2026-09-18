@@ -138,12 +138,19 @@ class ContentPipeline:
         drafts = []
         for target in brand.channels:
             caption, score = self._write_for_reach(
-                brief, strategy, target, recent, keyword, topic
+                brief, strategy, target, recent, keyword, topic,
+                brand.forbidden_claims,
             )
             # Link placement is enforced here, not asked of the writer: the
             # reach penalty is mechanical and a writer polishing a sentence
             # will quietly drop a rule it was told once.
             caption, first_comment = split_link(caption, target.channel)
+            if brand.disclaimer and brand.disclaimer not in caption:
+                # Appended here rather than asked of the writer: required
+                # wording is not something a model should remember most of
+                # the time, and the reach critic may rewrite the post after
+                # the writer has seen the instruction.
+                caption = f"{caption}\n\n{brand.disclaimer}"
 
             wanted = brand.media_for(target)
             draft = self.store.create(
@@ -185,6 +192,7 @@ class ContentPipeline:
         recent: list[str],
         keyword: Optional[str],
         topic: str = "",
+        forbidden: Optional[list[str]] = None,
     ) -> tuple[str, Optional[int]]:
         """Draft a post, then let the reach critic replace a weak one.
 
@@ -197,6 +205,7 @@ class ContentPipeline:
         caption = self.orchestrator.draft_post(
             brief, strategy, target.channel, target.label,
             recent_captions=recent, keyword=keyword, topic=topic,
+            forbidden=forbidden,
         ).output
 
         if not self.critique_reach:

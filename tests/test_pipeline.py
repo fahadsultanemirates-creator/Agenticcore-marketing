@@ -741,3 +741,80 @@ def test_publishing_stamps_when_it_actually_went_out(tmp_path):
 
     published = store.get(drafts[0].id)
     assert published.published_at and published.published_at.startswith("20")
+
+
+def test_disclaimer_is_appended_in_code_not_left_to_the_model(tmp_path):
+    """Required wording a regulator mandates can't depend on a model remembering it."""
+
+    brands = write_brand(
+        tmp_path, media="none",
+        disclaimer="Information only. Not financial advice.",
+        channels=[{"channel": "telegram", "label": "Channel"}],
+    )
+    store = DraftStore(tmp_path / "d.db")
+    pipeline = ContentPipeline(
+        brands, store, MarketingOrchestrator(llm=EchoLLMClient()),
+        FakeTelegramBot(), FakeAyrshareClient(), None, None, None, None, False,
+    )
+
+    draft = pipeline.queue_campaign("acme")[0]
+
+    assert draft.caption.endswith("Information only. Not financial advice.")
+
+
+def test_the_disclaimer_is_not_duplicated_if_already_present(tmp_path):
+    disclaimer = "Information only. Not financial advice."
+
+    class EchoesTheDisclaimer:
+        def complete(self, system, prompt):
+            return f"A post about markets.\n\n{disclaimer}"
+
+    brands = write_brand(tmp_path, media="none", disclaimer=disclaimer,
+                         channels=[{"channel": "telegram", "label": "C"}])
+    pipeline = ContentPipeline(
+        brands, DraftStore(tmp_path / "d.db"),
+        MarketingOrchestrator(llm=EchoesTheDisclaimer()),
+        FakeTelegramBot(), FakeAyrshareClient(), None, None, None, None, False,
+    )
+
+    draft = pipeline.queue_campaign("acme")[0]
+
+    assert draft.caption.count(disclaimer) == 1
+
+
+def test_forbidden_claims_reach_the_writer(tmp_path):
+    brands = write_brand(
+        tmp_path, media="none",
+        forbidden_claims=["any guaranteed return", "named clients"],
+        channels=[{"channel": "linkedin", "label": "LI"}],
+    )
+    pipeline = ContentPipeline(
+        brands, DraftStore(tmp_path / "d.db"),
+        MarketingOrchestrator(llm=EchoLLMClient()),
+        FakeTelegramBot(), FakeAyrshareClient(), None, None, None, None, False,
+    )
+
+    draft = pipeline.queue_campaign("acme")[0]
+
+    # EchoLLMClient reflects the prompt, so the caption proves what was sent.
+    assert "any guaranteed return" in draft.caption
+    assert "never_claim" in draft.caption
+
+
+def test_brand_description_reaches_the_research_agents(tmp_path):
+    """Without it the agents describe the brand by its goal, which says nothing."""
+
+    from agenticcore.brands import BrandProfile
+    from agenticcore.research import DemandResearchAgent, OfflineResearchClient
+
+    brand = BrandProfile.from_dict({
+        "slug": "acme", "name": "Acme", "audience": "Developers",
+        "description": "Builds fixed-price websites for real estate brokerages.",
+        "goal": "Drive signups",
+    })
+    client = OfflineResearchClient(text="NO OPPORTUNITIES FOUND")
+
+    DemandResearchAgent(client).find(brand)
+
+    _, prompt = client.calls[0]
+    assert "fixed-price websites for real estate brokerages" in prompt

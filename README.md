@@ -390,6 +390,31 @@ tests/
   test_research.py                   # opportunity parsing, dedupe, consumption
 ```
 
+### Compliance rules that cannot be left to the model
+
+Two brand fields exist for requirements that must hold on every post, not
+most of them:
+
+- **`disclaimer`** is appended in code after the post is written and after
+  the reach critic may have rewritten it. Required wording — a regulator's
+  mandated text, for instance — is not something a model should remember
+  most of the time.
+- **`forbidden_claims`** is passed to every writing agent on top of the
+  standard grounding rules: the specific claims this brand must never make,
+  in its own words.
+
+```json
+"disclaimer": "Information only. Not financial advice, and no recommendation to buy or sell.",
+"forbidden_claims": [
+  "any profit, return, win-rate or performance claim",
+  "any market figure not supplied in the brief — never state a number from memory"
+]
+```
+
+The second of those matters most where content discusses live data: a model
+writing market figures from memory produces stale or invented numbers, which
+is fatal in an audience that checks. Numbers have to arrive in the brief.
+
 ### Setting it up for real
 
 1. **Ayrshare** (publishing): create an account, link each Facebook/Instagram/

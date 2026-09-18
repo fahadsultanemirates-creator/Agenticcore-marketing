@@ -126,6 +126,7 @@ class MarketingOrchestrator:
         recent_captions: Optional[List[str]] = None,
         keyword: Optional[str] = None,
         topic: str = "",
+        forbidden: Optional[List[str]] = None,
     ) -> AgentResult:
         """Draft one publish-ready post for a single platform.
 
@@ -158,6 +159,9 @@ class MarketingOrchestrator:
                 "audience asks. Answer it directly and usefully enough that "
                 "someone would save the post."
             )
+        if forbidden:
+            context["never_claim"] = "; ".join(forbidden)
+            task += " Never make any of the claims listed in never_claim."
         if keyword:
             context["target_search_keyword"] = keyword
             task += (
