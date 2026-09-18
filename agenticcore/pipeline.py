@@ -25,6 +25,7 @@ itself. Without that feedback every campaign is the brand's first.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Optional
 
 from agenticcore.approval.telegram_bot import TelegramApprovalBot
@@ -34,7 +35,7 @@ from agenticcore.creative.base import ImageGenerator, VideoGenerator
 from agenticcore.orchestrator import CampaignBrief, MarketingOrchestrator
 from agenticcore.performance import PerformanceMemory, extract_metrics
 from agenticcore.reach import split_link
-from agenticcore.research import OpportunityStore, TerritoryStore
+from agenticcore.research import OpportunityStore, SignalStore, TerritoryStore
 from agenticcore.publishing.ayrshare import AyrshareClient
 from agenticcore.queue import DraftStore, PostDraft
 
@@ -54,6 +55,7 @@ class ContentPipeline:
         critique_reach: bool = True,
         opportunities: Optional[OpportunityStore] = None,
         territory: Optional[TerritoryStore] = None,
+        signals: Optional[SignalStore] = None,
     ):
         self.brands = brands
         self.store = store
@@ -75,6 +77,8 @@ class ContentPipeline:
         # Drives the search keyword at the brand's biggest uncovered gap
         # instead of repeating one static term on every post forever.
         self.territory = territory
+        # Perishable, so it outranks everything evergreen below.
+        self.signals = signals
 
     def trust_configured_chats(self) -> None:
         """Authorize every brand's approval chat up front.
@@ -108,8 +112,17 @@ class ContentPipeline:
         # Write about a researched question if one is queued. Falling back to
         # the brand profile keeps day one working, but an empty queue means
         # the campaign is guessing — run research to refill it.
-        opportunity = self.opportunities.next_open(brand.slug) if self.opportunities else None
-        topic = opportunity.as_brief() if opportunity else ""
+        # Priority order, and the reason for it: a live signal has a closing
+        # window, while a researched question and a territory gap will both
+        # still be there next week. Reacting late is the same as not
+        # reacting, so the perishable thing goes first.
+        signal = self.signals.next_live(brand.slug) if self.signals else None
+        opportunity = None
+        if signal:
+            topic = signal.as_brief()
+        else:
+            opportunity = self.opportunities.next_open(brand.slug) if self.opportunities else None
+            topic = opportunity.as_brief() if opportunity else ""
 
         # Aim at the biggest hole in the brand's search territory. Falling
         # back to the brand's own keyword keeps this working before any
@@ -155,6 +168,8 @@ class ContentPipeline:
         # Spend the opportunity only once posts exist for it, so a failure
         # part-way through leaves it open for the next run rather than
         # silently burning a researched topic nothing was published about.
+        if signal and drafts:
+            self.signals.mark_used(signal.id, draft_id=drafts[0].id)
         if opportunity and drafts:
             self.opportunities.mark_used(opportunity.id, draft_id=drafts[0].id)
         if gap and drafts:
@@ -296,8 +311,14 @@ class ContentPipeline:
             profile_key=brand.ayrshare_profile_key,
         )
         post_id = result.get("id")
-        self.store.update(draft.id, status="published", published_post_id=post_id)
+        # published_at is stamped here rather than read from updated_at,
+        # which moves on every later edit and so cannot say when a post
+        # actually went live — the one thing timing analysis needs.
+        published_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self.store.update(draft.id, status="published", published_post_id=post_id,
+                          published_at=published_at)
         draft.status, draft.published_post_id = "published", post_id
+        draft.published_at = published_at
 
         if draft.first_comment:
             # The link was pulled out of the body to avoid the reach penalty;

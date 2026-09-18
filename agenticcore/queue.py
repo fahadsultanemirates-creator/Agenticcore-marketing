@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS drafts (
     published_post_id TEXT,
     reach_score INTEGER,
     first_comment TEXT,
+    published_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -47,6 +48,7 @@ UPDATABLE_COLUMNS = frozenset(
         "published_post_id",
         "reach_score",
         "first_comment",
+        "published_at",
     }
 )
 
@@ -65,6 +67,7 @@ class PostDraft:
     published_post_id: Optional[str] = None
     reach_score: Optional[int] = None
     first_comment: Optional[str] = None
+    published_at: Optional[str] = None
 
     def telegram_caption(self, brand_name: str, channel_label: str) -> str:
         return f"[{brand_name} -> {channel_label}]\n\n{self.caption}"
@@ -84,6 +87,7 @@ class PostDraft:
             published_post_id=row["published_post_id"],
             reach_score=row["reach_score"],
             first_comment=row["first_comment"],
+            published_at=row["published_at"],
         )
 
 
@@ -107,7 +111,8 @@ class DraftStore:
         """
 
         existing = {row["name"] for row in conn.execute("PRAGMA table_info(drafts)")}
-        for column, ddl in (("reach_score", "INTEGER"), ("first_comment", "TEXT")):
+        for column, ddl in (("reach_score", "INTEGER"), ("first_comment", "TEXT"),
+                            ("published_at", "TEXT")):
             if column not in existing:
                 conn.execute(f"ALTER TABLE drafts ADD COLUMN {column} {ddl}")
 

@@ -679,3 +679,65 @@ def test_no_territory_falls_back_to_the_brand_keyword(tmp_path):
     drafts = pipeline.queue_campaign("acme")
 
     assert "ai marketing automation" in drafts[0].caption
+
+
+def _with_signals_and_opportunities(tmp_path):
+    from agenticcore.research import (
+        OpportunityStore, SignalStore, parse_opportunities, parse_signals,
+    )
+
+    brands = write_brand(tmp_path, media="none",
+                         channels=[{"channel": "linkedin", "label": "LI"}])
+    store = DraftStore(tmp_path / "d.db")
+    ops = OpportunityStore(tmp_path / "d.db")
+    ops.add_all(parse_opportunities(
+        "QUERY: an evergreen question worth answering\n", "acme", []))
+    sigs = SignalStore(tmp_path / "d.db")
+    sigs.add_all(parse_signals(
+        "HEADLINE: a vendor shipped something this week\nURGENCY: 5\n"
+        "WHY: buyers will ask about it\n", "acme", []))
+
+    pipeline = ContentPipeline(
+        brands, store, MarketingOrchestrator(llm=EchoLLMClient()),
+        FakeTelegramBot(), FakeAyrshareClient(), OfflineImageGenerator(),
+        None, None, None, False, ops, None, sigs,
+    )
+    return pipeline, ops, sigs
+
+
+def test_a_live_signal_outranks_an_evergreen_opportunity(tmp_path):
+    """The window on a signal closes; a researched question keeps."""
+
+    pipeline, ops, sigs = _with_signals_and_opportunities(tmp_path)
+
+    drafts = pipeline.queue_campaign("acme")
+
+    assert "a vendor shipped something this week" in drafts[0].caption
+    assert "an evergreen question" not in drafts[0].caption
+    # And the opportunity was not spent while the signal took its place.
+    assert ops.next_open("acme") is not None
+    assert sigs.next_live("acme") is None
+
+
+def test_once_signals_run_out_the_evergreen_queue_resumes(tmp_path):
+    pipeline, ops, _ = _with_signals_and_opportunities(tmp_path)
+
+    pipeline.queue_campaign("acme")          # spends the signal
+    second = pipeline.queue_campaign("acme")  # falls back
+
+    assert "an evergreen question worth answering" in second[0].caption
+    assert ops.next_open("acme") is None
+
+
+def test_publishing_stamps_when_it_actually_went_out(tmp_path):
+    """updated_at moves on every edit, so timing analysis needs its own stamp."""
+
+    pipeline, bot, _, store = make_pipeline(tmp_path)
+    drafts = pipeline.queue_campaign("acme")
+    assert drafts[0].published_at is None
+
+    bot.queue_decision(drafts[0].id, "approve")
+    pipeline.process_decisions()
+
+    published = store.get(drafts[0].id)
+    assert published.published_at and published.published_at.startswith("20")

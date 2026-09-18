@@ -9,6 +9,8 @@ Usage:
     python examples/run_pipeline.py --research <slug> # find topics worth posting about
     python examples/run_pipeline.py --territory <slug> # map the search space to own
     python examples/run_pipeline.py --coverage <slug>  # show what is covered and what is not
+    python examples/run_pipeline.py --signals <slug>   # what just happened + competitor moves
+    python examples/run_pipeline.py --timing <slug>    # when this brand's posts actually land
     python examples/run_pipeline.py <slug> --dry-run # preview, no network calls
 
 --listen is what you want after a restart: it picks up drafts queued by an
@@ -27,6 +29,14 @@ gap, so the brand works through its territory instead of repeating one
 keyword. --coverage prints the map with what has been covered. Search reach
 compounds while feed reach decays within days; this is how you accumulate
 the first kind on purpose.
+
+--signals looks for what changed this week and what competitors published.
+Signals expire, and a live one jumps ahead of evergreen topics: a news hook
+has a closing window, a territory gap will still be there tomorrow. Run it
+daily if you want to react in time.
+
+--timing reports when this brand's posts actually land, learned from its own
+results. It stays silent until the sample is large enough to mean anything.
 
 --collect reads back how published posts performed and stores the numbers.
 Run it on a schedule (daily is plenty — posts accrue views for days, and
@@ -63,12 +73,14 @@ from agenticcore.creative.base import OfflineImageGenerator, OfflineVideoGenerat
 from agenticcore.llm import EchoLLMClient
 from agenticcore.orchestrator import CampaignBrief, MarketingOrchestrator
 from agenticcore.pipeline import ContentPipeline
-from agenticcore.performance import MetricsStore, PerformanceMemory
+from agenticcore.performance import MetricsStore, PerformanceMemory, timing_report
 from agenticcore.publishing.analytics import AyrshareAnalytics
 from agenticcore.publishing.ayrshare import AyrshareClient
 from agenticcore.research import (
     DemandResearchAgent,
     OpportunityStore,
+    SignalAgent,
+    SignalStore,
     TerritoryAgent,
     TerritoryStore,
     default_research_client,
@@ -134,10 +146,13 @@ def main() -> None:
     research_only = "--research" in flags
     territory_only = "--territory" in flags
     coverage_only = "--coverage" in flags
+    signals_only = "--signals" in flags
+    timing_only = "--timing" in flags
     every_brand = "--all" in flags
 
-    if not args and not (listen_only or every_brand or collect_only
-                         or research_only or territory_only or coverage_only):
+    if not args and not (listen_only or every_brand or collect_only or research_only
+                         or territory_only or coverage_only or signals_only
+                         or timing_only):
         print(__doc__.split("Requires")[0].strip(), file=sys.stderr)
         raise SystemExit(1)
 
@@ -150,8 +165,22 @@ def main() -> None:
             print()
         return
 
+    if timing_only:
+        store = DraftStore("agenticcore.db")
+        metrics = MetricsStore("agenticcore.db")
+        for slug in (args or [b.slug for b in brands.all()]):
+            report = timing_report(store, metrics, slug)
+            print(report or f"{slug}: not enough measured posts yet to tell you "
+                            f"when to post. Publish more, run --collect, come back.")
+            print()
+        return
+
     if research_only:
         run_research(brands, args, dry_run)
+        return
+
+    if signals_only:
+        run_signals(brands, args, dry_run)
         return
 
     if territory_only:
@@ -183,11 +212,13 @@ def main() -> None:
     memory = PerformanceMemory(store, MetricsStore("agenticcore.db"))
     opportunities = OpportunityStore("agenticcore.db")
     territory = TerritoryStore("agenticcore.db")
+    signals = SignalStore("agenticcore.db")
+    signals.expire_stale()
     bot = TelegramApprovalBot()
     publisher = AyrshareClient()
     pipeline = ContentPipeline(
         brands, store, orchestrator, bot, publisher, image_generator, video_generator,
-        memory, AyrshareAnalytics(), True, opportunities, territory,
+        memory, AyrshareAnalytics(), True, opportunities, territory, signals,
     )
     # Trust every brand's chat, not just the one we generate for: in --listen
     # the taps we're waiting on belong to drafts queued by an earlier run.
@@ -264,6 +295,48 @@ def run_research(brands: BrandRegistry, args: list[str], dry_run: bool) -> None:
     total = sum(len(store.for_brand(s, status="open")) for s in slugs)
     print(f"\n{total} opportunit{'y' if total == 1 else 'ies'} queued. "
           f"Each campaign spends one.")
+
+
+def run_signals(brands: BrandRegistry, args: list[str], dry_run: bool) -> None:
+    """Look for what changed this week, and what competitors are saying."""
+
+    if dry_run:
+        print("--signals needs ANTHROPIC_API_KEY: it runs live web searches.",
+              file=sys.stderr)
+        return
+
+    store = SignalStore("agenticcore.db")
+    expired = store.expire_stale()
+    if expired:
+        print(f"({expired} signal(s) passed their window and were retired)")
+    agent = SignalAgent(default_research_client())
+
+    for slug in (args or [b.slug for b in brands.all()]):
+        brand = brands.get(slug)
+        known = [s.headline for s in store.for_brand(slug)]
+        print(f"\nWatching {brand.name}...")
+
+        for label, finder in (("market", agent.find_events),
+                              ("competitors", agent.watch_competitors)):
+            found, result = finder(brand, known=known)
+            if not result.is_grounded:
+                print(f"  {label}: no searches ran — not storing a guess.",
+                      file=sys.stderr)
+                continue
+            if not found:
+                print(f"  {label}: nothing worth reacting to. A quiet week is "
+                      f"a real finding.")
+                continue
+            fresh = store.add_all(found)
+            known += [s.headline for s in fresh]
+            print(f"  {label}: {len(fresh)} new signal(s)")
+            for s in fresh:
+                print(f"    u{s.urgency} [{s.kind}, {s.freshness_hours}h] {s.headline}")
+                if s.angle:
+                    print(f"       angle: {s.angle}")
+
+    live = sum(len(store.live(s)) for s in (args or [b.slug for b in brands.all()]))
+    print(f"\n{live} live signal(s). The next campaign takes the most urgent one.")
 
 
 def run_territory(brands: BrandRegistry, args: list[str], dry_run: bool) -> None:

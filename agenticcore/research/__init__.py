@@ -6,6 +6,15 @@ from agenticcore.research.client import (
     default_research_client,
 )
 from agenticcore.research.demand import DemandResearchAgent
+from agenticcore.research.signals import (
+    KIND_COMPETITOR,
+    KIND_EVENT,
+    KIND_TREND,
+    MarketSignal,
+    SignalAgent,
+    SignalStore,
+    parse_signals,
+)
 from agenticcore.research.territory import (
     KeywordTarget,
     TerritoryAgent,
@@ -37,6 +46,13 @@ __all__ = [
     "TerritoryStore",
     "parse_territory",
     "cluster_performance",
+    "MarketSignal",
+    "SignalAgent",
+    "SignalStore",
+    "parse_signals",
+    "KIND_EVENT",
+    "KIND_COMPETITOR",
+    "KIND_TREND",
     "STATUS_OPEN",
     "STATUS_USED",
     "STATUS_DROPPED",

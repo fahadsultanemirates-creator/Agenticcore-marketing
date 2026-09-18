@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections import defaultdict
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -270,3 +271,75 @@ class PerformanceMemory:
         lines += ["", "WEAKEST — treat these as angles to avoid repeating:"]
         lines += [f"  {m.summary_line(captions.get(m.draft_id, ''))}" for m in worst]
         return "\n".join(lines)
+
+
+#: Below this many measured posts in a slot, a "best time" is one lucky post.
+MIN_POSTS_PER_SLOT = 3
+
+#: And below this many overall, the comparison between slots is meaningless.
+MIN_POSTS_FOR_TIMING = 8
+
+DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def _slot(published_at: str) -> Optional[tuple[int, int]]:
+    """(weekday, hour) in UTC from a stored ISO timestamp."""
+
+    from datetime import datetime
+
+    try:
+        stamp = datetime.fromisoformat(published_at)
+    except (TypeError, ValueError):
+        return None
+    return stamp.weekday(), stamp.hour
+
+
+def timing_report(drafts, metrics: MetricsStore, brand_slug: str) -> str:
+    """When this brand's posts actually land, learned from its own results.
+
+    Returns "" rather than a guess when the sample is too thin. Generic
+    "best times to post" advice is an average over everyone else's audience;
+    the only version worth acting on is the one measured on yours, and that
+    needs enough posts to mean anything.
+    """
+
+    published = {d.id: d for d in drafts.list_for_brand(brand_slug, status="published")}
+    measured = [m for m in metrics.for_brand(brand_slug) if m.impressions > 0]
+
+    buckets: dict[tuple[int, int], list[float]] = defaultdict(list)
+    counted = 0
+    for m in measured:
+        draft = published.get(m.draft_id)
+        if not draft or not draft.published_at:
+            continue
+        slot = _slot(draft.published_at)
+        if slot is None:
+            continue
+        buckets[slot].append(m.engagement_rate)
+        counted += 1
+
+    if counted < MIN_POSTS_FOR_TIMING:
+        return ""
+
+    ranked = [
+        (slot, sum(rates) / len(rates), len(rates))
+        for slot, rates in buckets.items()
+        if len(rates) >= MIN_POSTS_PER_SLOT
+    ]
+    if not ranked:
+        return ""
+
+    ranked.sort(key=lambda row: -row[1])
+    lines = [
+        f"When {brand_slug}'s posts land, from {counted} measured post(s) "
+        f"(times are UTC; only slots with {MIN_POSTS_PER_SLOT}+ posts shown):",
+    ]
+    for (day, hour), rate, n in ranked[:5]:
+        lines.append(f"  {DAY_NAMES[day]} {hour:02d}:00 — {rate * 100:.1f}% across {n} post(s)")
+    if len(ranked) > 1:
+        best, worst = ranked[0], ranked[-1]
+        lines.append(
+            f"  Best slot outperforms the weakest by "
+            f"{best[1] / worst[1]:.1f}x." if worst[1] else ""
+        )
+    return "\n".join(l for l in lines if l)

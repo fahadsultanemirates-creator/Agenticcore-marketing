@@ -316,3 +316,114 @@ def test_cluster_performance_is_empty_before_any_results(tmp_path):
     from agenticcore.research import cluster_performance
 
     assert cluster_performance(_territory(tmp_path).for_brand("ac"), {}, []) == ""
+
+
+# --- market signals ---
+
+SIGNALS_REPLY = """### SIGNAL
+HEADLINE: A major vendor shipped a no-code agent builder this week
+KIND: event
+WHAT: Launched Tuesday, overlaps what small agencies sell.
+WHY: Buyers will ask why they should pay an agency at all.
+ANGLE: Answer it before prospects raise it.
+URGENCY: 5
+FRESHNESS_HOURS: 72
+
+### SIGNAL
+HEADLINE: Rival agencies have started publishing real pricing pages
+URGENCY: 2
+KIND: competitor
+FRESHNESS_HOURS: 240
+WHY: Pricing transparency is becoming table stakes.
+"""
+
+
+def _signals(tmp_path):
+    from agenticcore.research import SignalStore, parse_signals
+
+    store = SignalStore(tmp_path / "s.db")
+    store.add_all(parse_signals(SIGNALS_REPLY, "ac", ["https://s.test"]))
+    return store
+
+
+def test_signals_parse_in_any_field_order():
+    from agenticcore.research import parse_signals
+
+    by_kind = {s.kind: s for s in parse_signals(SIGNALS_REPLY, "ac", [])}
+
+    assert by_kind["competitor"].urgency == 2        # URGENCY came before KIND
+    assert by_kind["competitor"].freshness_hours == 240
+    assert by_kind["event"].urgency == 5
+
+
+def test_freshness_is_capped_at_two_weeks():
+    """Anything longer-lived is evergreen and belongs in the territory map."""
+
+    from agenticcore.research import parse_signals
+
+    s = parse_signals("HEADLINE: something happened here\nFRESHNESS_HOURS: 99999\n", "a", [])[0]
+
+    assert s.freshness_hours == 336
+
+
+def test_live_signals_are_ordered_most_urgent_first(tmp_path):
+    store = _signals(tmp_path)
+
+    assert store.next_live("ac").urgency == 5
+
+
+def test_a_signal_past_its_window_is_no_longer_live(tmp_path):
+    import sqlite3
+
+    store = _signals(tmp_path)
+    conn = sqlite3.connect(tmp_path / "s.db")
+    conn.execute("UPDATE market_signals SET detected_at = datetime('now','-5 days')")
+    conn.commit()
+    conn.close()
+
+    live = store.live("ac")
+
+    # The 72h event has expired; the 240h competitor signal is still inside its window.
+    assert [s.kind for s in live] == ["competitor"]
+    assert store.expire_stale("ac") == 1
+
+
+def test_using_a_signal_takes_it_out_of_the_queue(tmp_path):
+    store = _signals(tmp_path)
+    first = store.next_live("ac")
+
+    store.mark_used(first.id, draft_id="d1")
+
+    assert store.next_live("ac").id != first.id
+
+
+def test_duplicate_headlines_are_not_tracked_twice(tmp_path):
+    from agenticcore.research import parse_signals
+
+    store = _signals(tmp_path)
+
+    assert store.add_all(parse_signals(SIGNALS_REPLY, "ac", [])) == []
+
+
+def test_competitor_brief_forbids_inventing_their_numbers():
+    """Search shows what a rival published, never how it performed."""
+
+    from agenticcore.research import KIND_COMPETITOR, MarketSignal
+
+    brief = MarketSignal(
+        id="1", brand_slug="a", headline="Rival published a pricing page",
+        kind=KIND_COMPETITOR,
+    ).as_brief()
+
+    assert "never claim engagement numbers" in brief
+    assert "Do not name or attack them" in brief
+
+
+def test_no_signals_found_is_respected(tmp_path):
+    from agenticcore.research import OfflineResearchClient, SignalAgent
+
+    agent = SignalAgent(OfflineResearchClient(text="NO SIGNALS FOUND"))
+
+    found, _ = agent.find_events(brand())
+
+    assert found == []

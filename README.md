@@ -109,6 +109,58 @@ clusters by engagement rate. One post doing well is noise; a cluster of
 eight consistently outperforming is a real instruction about what this
 audience wants.
 
+## Timing: signals that expire, and when to post
+
+Opportunities and territory are evergreen — a question worth answering this
+month still is next month. Signals are the opposite, and that difference
+drives the design.
+
+```bash
+python examples/run_pipeline.py --signals agenticcore   # what changed, what rivals said
+python examples/run_pipeline.py --timing agenticcore    # when this brand's posts land
+```
+
+`SignalAgent` watches two things: what changed in the market this week, and
+what competitors are publishing. Each signal carries a `freshness_hours`
+shelf life and expires on its own.
+
+**A live signal jumps the queue.** A news hook has a closing window; a
+territory gap will still be there tomorrow. Reacting late is the same as not
+reacting, so the perishable thing goes first, and the queue is ordered by
+urgency then by whatever expires soonest so nothing sits until it rots.
+Anything claiming a shelf life beyond two weeks is capped — it's evergreen
+and belongs in the territory map.
+
+### What competitor monitoring honestly is
+
+Search shows what a competitor **published**. It does not show how that post
+**performed** — impressions, engagement and follower growth are not public.
+The prompt forbids stating or implying those numbers, because a fabricated
+engagement figure for a rival is the same failure as a fabricated statistic
+about yourself. What's actually useful is the claims they all make (worthless
+to repeat), the questions they all dodge (the real openings), and gaps none
+of them cover. The agent is also told not to name or attack anyone — the
+useful move is the better position, not the fight.
+
+### Posting time, measured not assumed
+
+`timing_report()` learns each brand's real window from its own results, and
+**returns nothing until the sample can support a conclusion** — at least 8
+measured posts overall and 3 in any slot it reports. Generic "best times to
+post" advice is an average over everyone else's audience. The only version
+worth acting on is measured on yours.
+
+```
+When agenticcore's posts land, from 12 measured post(s) (times are UTC):
+  Tue 09:00 — 8.0% across 8 post(s)
+  Thu 22:00 — 0.8% across 4 post(s)
+  Best slot outperforms the weakest by 10.0x.
+```
+
+This needed a real `published_at` column: `updated_at` moves on every later
+edit, so it can't say when a post actually went live — the one thing timing
+analysis needs.
+
 ## Built for reach, not for posting
 
 Filling pages is easy and worth nothing. Getting shown to people is the job,
@@ -297,6 +349,7 @@ agenticcore/
     demand.py                # finds what the audience is actually asking
     opportunities.py          # ContentOpportunity + OpportunityStore
     territory.py               # keyword map, coverage, cluster performance
+    signals.py                  # perishable events + competitor watch
     parsing.py                  # order-independent block parsing
   pipeline.py              # ContentPipeline: wires everything below together
   agents/
