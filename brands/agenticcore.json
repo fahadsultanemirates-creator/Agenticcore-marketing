@@ -1,7 +1,6 @@
 {
   "slug": "agenticcore",
   "name": "AgenticCore",
-
   "description": "A done-for-you agency where AI agents plan, build and run the work: custom websites, branding, marketing, bookkeeping and reports, plus feasibility and audits. Also builds custom AI agent frameworks to a client's own strategy — the client owns the strategy, AgenticCore builds the system. Packages bundle a landing site, social content, branded documents and a feasibility + marketing report from $150. Its marketing arm (agenticcore.biz) specialises in complete campaigns for real estate developers. Everything is fixed-price and quoted before any payment.",
 
   "audience": "Real estate developers, agents and brokerages who need marketing and systems built for them, plus founders launching a business from scratch with no setup yet. Global, weighted to markets with the most demand — India, Pakistan and the Gulf.",
@@ -10,7 +9,7 @@
 
   "tone": "plain, concrete, no hype. Explains the mechanism rather than selling the outcome. Confident without claiming credentials it does not have.",
 
-  "media": "image",
+  "media": "none",
 
   "keywords": [
     "marketing for real estate developers",
@@ -30,6 +29,35 @@
   "telegram_chat_id": null,
 
   "channels": [
-    { "channel": "linkedin", "label": "AgenticCore LinkedIn", "media": "none" }
+    {
+      "channel": "facebook",
+      "label": "AgenticCore Facebook Page",
+      "media": "none"
+    },
+    {
+      "channel": "twitter",
+      "label": "AgenticCore X",
+      "media": "none"
+    },
+    {
+      "channel": "telegram",
+      "label": "AgenticCore Telegram Channel",
+      "media": "none"
+    },
+    {
+      "channel": "instagram",
+      "label": "AgenticCore Instagram",
+      "media": "video"
+    },
+    {
+      "channel": "tiktok",
+      "label": "AgenticCore TikTok",
+      "media": "video"
+    },
+    {
+      "channel": "youtube",
+      "label": "AgenticCore YouTube",
+      "media": "video"
+    }
   ]
 }

@@ -1,7 +1,6 @@
 {
   "slug": "mmcore",
   "name": "M&MCore",
-
   "description": "The value-priced sister site of AgenticCore, under the same umbrella and the same AI-run delivery model, with one simplified tier per service and no premium markup. Real prices starting at $32. Sites, branding, marketing and bookkeeping, plus a Starter Package bundling a landing page, a batch of social posts, branded documents and a feasibility + marketing report at one fixed price. Two named verticals on the homepage: social media marketing for real estate agents and brokerages, and an AI trading bot with built-in risk control for Forex and crypto.",
 
   "audience": "Price-sensitive real estate agents and small brokerages, and first-time founders who want something live cheaply. Global, weighted to India, Pakistan and the Gulf where the price point matters most.",
@@ -10,7 +9,7 @@
 
   "tone": "direct and unpretentious. Leads with the price and what you get for it. Never apologises for being the cheaper option — treats transparent pricing as the advantage it is.",
 
-  "media": "image",
+  "media": "none",
 
   "keywords": [
     "cheap social media marketing for real estate agents",
@@ -29,6 +28,35 @@
   "telegram_chat_id": null,
 
   "channels": [
-    { "channel": "linkedin", "label": "M&MCore LinkedIn", "media": "none" }
+    {
+      "channel": "facebook",
+      "label": "M&MCore Facebook Page",
+      "media": "none"
+    },
+    {
+      "channel": "twitter",
+      "label": "M&MCore X",
+      "media": "none"
+    },
+    {
+      "channel": "telegram",
+      "label": "M&MCore Telegram Channel",
+      "media": "none"
+    },
+    {
+      "channel": "instagram",
+      "label": "M&MCore Instagram",
+      "media": "video"
+    },
+    {
+      "channel": "tiktok",
+      "label": "M&MCore TikTok",
+      "media": "video"
+    },
+    {
+      "channel": "youtube",
+      "label": "M&MCore YouTube",
+      "media": "video"
+    }
   ]
 }

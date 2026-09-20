@@ -1,7 +1,6 @@
 {
   "slug": "agenticcore-markets",
   "name": "AgenticCore Markets",
-
   "description": "A market information service for Forex and crypto, sold as packages. It does NOT tell anyone to buy or sell anything and issues no signals or recommendations. What it provides is genuine analysis built from live data and APIs: market news, economic calendar alerts, and market capitalisation data from CoinMarketCap.",
 
   "audience": "Active Forex and crypto traders who follow the market daily and want the data in one place. Community-first — Telegram is where this audience already is, particularly across India, Pakistan and the Gulf.",
@@ -32,6 +31,35 @@
   "telegram_chat_id": null,
 
   "channels": [
-    { "channel": "telegram", "label": "AgenticCore Markets Telegram" }
+    {
+      "channel": "facebook",
+      "label": "AgenticCore Markets Facebook Page",
+      "media": "none"
+    },
+    {
+      "channel": "twitter",
+      "label": "AgenticCore Markets X",
+      "media": "none"
+    },
+    {
+      "channel": "telegram",
+      "label": "AgenticCore Markets Telegram Channel",
+      "media": "none"
+    },
+    {
+      "channel": "instagram",
+      "label": "AgenticCore Markets Instagram",
+      "media": "video"
+    },
+    {
+      "channel": "tiktok",
+      "label": "AgenticCore Markets TikTok",
+      "media": "video"
+    },
+    {
+      "channel": "youtube",
+      "label": "AgenticCore Markets YouTube",
+      "media": "video"
+    }
   ]
 }
