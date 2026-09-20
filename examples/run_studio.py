@@ -29,6 +29,7 @@ from agenticcore.research import (
     OpportunityStore, SignalStore, TerritoryStore, WebsiteStore,
 )
 from agenticcore.studio import PostStudio
+from agenticcore.topics import TopicLedger
 
 DB = "agenticcore.db"
 
@@ -41,7 +42,7 @@ def build_studio() -> tuple[PostStudio, BrandRegistry]:
         brands, MarketingOrchestrator(),
         websites=WebsiteStore(DB), store=DraftStore(DB),
         opportunities=OpportunityStore(DB), territory=TerritoryStore(DB),
-        signals=signals,
+        signals=signals, ledger=TopicLedger(DB),
     )
     return studio, brands
 

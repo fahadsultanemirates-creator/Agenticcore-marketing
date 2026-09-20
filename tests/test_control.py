@@ -9,6 +9,8 @@ from agenticcore.control import (
 from agenticcore.llm import EchoLLMClient
 from agenticcore.orchestrator import MarketingOrchestrator
 from agenticcore.queue import DraftStore
+from agenticcore.research import WebsiteStore, parse_profile
+from agenticcore.topics import TopicLedger
 from agenticcore.studio import PostStudio
 
 
@@ -42,8 +44,14 @@ def make_bot(tmp_path, llm=None):
     brands = BrandRegistry(d)
 
     sent = []
+    websites = WebsiteStore(tmp_path / "c.db")
+    for slug in ("acme", "beta"):
+        websites.save(parse_profile(
+            "TOPICS: " + " | ".join(f"a good angle number {i}" for i in range(12)),
+            slug, f"https://{slug}.test"))
     studio = PostStudio(brands, MarketingOrchestrator(llm=llm or EchoLLMClient()),
-                        store=DraftStore(tmp_path / "c.db"), critique=False)
+                        websites=websites, store=DraftStore(tmp_path / "c.db"),
+                        ledger=TopicLedger(tmp_path / "c.db"), critique=False)
     bot = ControlBot(studio, brands,
                      send=lambda chat, text, kb=None: sent.append((chat, text, kb)))
     return bot, sent
@@ -246,3 +254,48 @@ def test_the_transport_trusts_the_configured_chat(monkeypatch):
 
     assert transport._allowed("12345") is True
     assert transport._allowed("99999") is False
+
+
+def test_a_site_with_no_topics_yet_is_told_so_not_told_it_is_exhausted(tmp_path):
+    """Never having had topics and having used them all need different fixes."""
+
+    bot, sent = make_bot(tmp_path)
+    bot.studio.websites = None          # no site profile at all
+    bot.on_action("1", "site:acme")
+    sent.clear()
+
+    bot.on_action("1", "go")
+
+    text = " ".join(t for _, t, _ in sent)
+    assert "no topics yet" in text
+    assert "exhausted" not in text and "every angle" not in text
+
+
+def test_an_exhausted_site_offers_repeats_and_a_reset(tmp_path):
+    bot, sent = make_bot(tmp_path)
+    bot.on_action("1", "site:acme")
+    bot.on_action("1", "count:10")
+    bot.on_action("1", "go")      # burns 10 of 12
+    bot.on_action("1", "go")      # burns the rest and runs dry
+    sent.clear()
+
+    bot.on_action("1", "go")
+
+    text = " ".join(t for _, t, _ in sent)
+    assert "no fresh topic left" in text
+    buttons = labels(sent[-1][2])
+    assert "Allow repeats once" in buttons
+    assert "Clear topic history" in buttons
+
+
+def test_clearing_topic_history_frees_everything(tmp_path):
+    bot, sent = make_bot(tmp_path)
+    bot.on_action("1", "site:acme")
+    bot.on_action("1", "count:5")
+    bot.on_action("1", "go")
+    sent.clear()
+
+    bot.on_action("1", "topics:reset")
+
+    assert "Everything is available again" in sent[0][1]
+    assert bot.studio.used_topics("acme") == set()

@@ -86,6 +86,7 @@ class ControlBot:
                  button("Which page", "menu:platform")],
                 [button("Set a topic", "menu:topic"),
                  button("Let it decide", "topic:auto")],
+                [button("Clear topic history", "topics:reset")],
                 [button("Generate", "go")],
             ),
         )
@@ -199,13 +200,19 @@ class ControlBot:
             return self.main_menu(chat_id)
 
         if name == "go":
-            return self.generate(chat_id)
+            return self.generate(chat_id, allow_repeats=(value == "repeat"))
+
+        if name == "topics" and value == "reset":
+            freed = self.studio.free_topics(sel.brand_slug) if sel.brand_slug else 0
+            self.send(chat_id, f"Cleared {freed} covered topic(s). "
+                               f"Everything is available again.", None)
+            return self.main_menu(chat_id)
 
         self.main_menu(chat_id)
 
     # -- generation ----------------------------------------------------
 
-    def generate(self, chat_id: str) -> None:
+    def generate(self, chat_id: str, allow_repeats: bool = False) -> None:
         sel = self.selection(chat_id)
         if not sel.brand_slug:
             self.send(chat_id, "Pick a site first.", None)
@@ -217,8 +224,8 @@ class ControlBot:
         try:
             if sel.kind == "video":
                 batch = self.studio.make_videos(
-                    sel.brand_slug, count=sel.count,
-                    seconds=sel.seconds, topic=sel.topic,
+                    sel.brand_slug, count=sel.count, seconds=sel.seconds,
+                    topic=sel.topic, allow_repeats=allow_repeats,
                 )
                 for package in batch.videos:
                     for message in package.as_telegram_messages():
@@ -227,8 +234,8 @@ class ControlBot:
                         self.send(chat_id, f"heads up: {warning}", None)
             else:
                 batch = self.studio.make_posts(
-                    sel.brand_slug, count=sel.count,
-                    platform=sel.platform, topic=sel.topic,
+                    sel.brand_slug, count=sel.count, platform=sel.platform,
+                    topic=sel.topic, allow_repeats=allow_repeats,
                 )
                 total = len(batch.posts)
                 for i, post in enumerate(batch.posts, 1):
@@ -238,6 +245,31 @@ class ControlBot:
             # dropping the chat into a dead end with no way back.
             self.send(chat_id, f"That didn't work: {exc}", None)
             return self.main_menu(chat_id)
+
+        if getattr(batch, "unresearched", False):
+            self.send(
+                chat_id,
+                f"{len(batch)} item(s) — but this site has no topics yet. "
+                f"Nothing has been read about it and no research has run, so "
+                f"these were written from the brand profile alone.\n\n"
+                f"Read its website or run research and the next batch will be "
+                f"far more specific.",
+                rows([button("Menu", "menu:main")]),
+            )
+            return
+
+        if getattr(batch, "exhausted", False):
+            self.send(
+                chat_id,
+                f"{len(batch)} item(s), but {batch.without_topic} had no fresh "
+                f"topic left — this site has been written about on every angle "
+                f"the framework knows.\n\nEither research more topics for it, "
+                f"or allow repeats.",
+                rows([button("Allow repeats once", "go:repeat")],
+                     [button("Clear topic history", "topics:reset")],
+                     [button("Menu", "menu:main")]),
+            )
+            return
 
         self.send(
             chat_id, f"{len(batch)} item(s). Copy what you want.",

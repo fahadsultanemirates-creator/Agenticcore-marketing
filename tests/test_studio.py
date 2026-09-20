@@ -295,3 +295,107 @@ def test_a_kept_post_shows_its_score_plainly(tmp_path):
     assert post.revised is False
     assert "reach 9/10" in post.as_telegram_message()
     assert "rewritten" not in post.as_telegram_message()
+
+
+def test_the_avoid_list_does_not_grow_with_the_batch(tmp_path):
+    """Unbounded, post 10 carries 19 full captions — costly and diluting."""
+
+    from agenticcore.studio import AVOID_CHARS, AVOID_WINDOW
+
+    seen_sizes = []
+
+    class MeasuresItsPrompt:
+        def complete(self, system, prompt):
+            seen_sizes.append(len(prompt))
+            return "A post of perfectly ordinary length that says something."
+
+    studio, _, _ = make_studio(tmp_path, llm=MeasuresItsPrompt())
+    studio.make_posts("acme", count=10)
+
+    # The last prompt must not be dramatically larger than the first.
+    assert max(seen_sizes) < min(seen_sizes) + AVOID_WINDOW * AVOID_CHARS * 2
+
+
+def test_only_the_opening_of_a_previous_post_is_carried(tmp_path):
+    from agenticcore.studio import AVOID_CHARS, _opening
+
+    long_post = "word " * 500
+
+    assert len(_opening(long_post)) <= AVOID_CHARS + 1
+    assert _opening("short one") == "short one"
+
+
+def test_a_big_batch_finishes_quickly(tmp_path):
+    import time
+
+    studio, _, _ = make_studio(tmp_path)
+
+    start = time.time()
+    batch = studio.make_posts("acme", count=10)
+
+    assert len(batch.posts) == 10
+    assert time.time() - start < 10
+
+
+def test_videos_never_repeat_a_topic(tmp_path):
+    """The hole: video topics were never recorded, so every batch matched."""
+
+    from agenticcore.topics import TopicLedger
+
+    studio, _, _ = make_studio(tmp_path)
+    studio.ledger = TopicLedger(tmp_path / "s.db")
+
+    topics = []
+    for _ in range(3):
+        topics += studio.make_videos("acme", count=1, seconds=10).topics_used
+
+    assert len([t for t in topics if t]) == len({t for t in topics if t})
+
+
+def test_posts_and_videos_share_one_topic_ledger(tmp_path):
+    """A video spends a topic exactly as a post does."""
+
+    from agenticcore.topics import TopicLedger
+
+    studio, _, _ = make_studio(tmp_path)
+    studio.ledger = TopicLedger(tmp_path / "s.db")
+
+    post_topics = studio.make_posts("acme", count=1).topics_used
+    video_topics = studio.make_videos("acme", count=1, seconds=10).topics_used
+
+    assert set(post_topics) & set(video_topics) == set()
+
+
+def test_a_named_topic_overrides_the_no_repeat_rule(tmp_path):
+    """Asking for it IS the asking."""
+
+    studio, _, _ = make_studio(tmp_path)
+
+    first = studio.make_posts("acme", count=1, topic="Weekend 30% off")
+    again = studio.make_posts("acme", count=1, topic="Weekend 30% off")
+
+    assert first.posts[0].topic == again.posts[0].topic == "Weekend 30% off"
+
+
+def test_allow_repeats_reopens_the_material(tmp_path):
+    from agenticcore.topics import TopicLedger
+
+    studio, _, _ = make_studio(tmp_path)
+    studio.ledger = TopicLedger(tmp_path / "s.db")
+    first = studio.make_posts("acme", count=3).topics_used
+
+    repeated = studio.make_posts("acme", count=3, allow_repeats=True).topics_used
+
+    assert set(repeated) == set(first)
+
+
+def test_freeing_topics_starts_the_site_over(tmp_path):
+    from agenticcore.topics import TopicLedger
+
+    studio, _, _ = make_studio(tmp_path)
+    studio.ledger = TopicLedger(tmp_path / "s.db")
+    studio.make_posts("acme", count=3)
+
+    studio.free_topics("acme")
+
+    assert studio.ledger.used_keys("acme") == set()

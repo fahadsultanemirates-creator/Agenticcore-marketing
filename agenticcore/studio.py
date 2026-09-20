@@ -25,6 +25,7 @@ from typing import Optional
 from agenticcore.brands import MEDIA_VIDEO, BrandProfile
 from agenticcore.orchestrator import CampaignBrief
 from agenticcore.reach import split_link
+from agenticcore.topics import TopicLedger, topic_key
 from agenticcore.video import VideoPackage, VideoPackageAgent
 
 #: Where an auto-chosen topic can come from, best first. A live signal beats
@@ -32,6 +33,14 @@ from agenticcore.video import VideoPackage, VideoPackageAgent
 #: website itself suggests — but any of them beats asking a model to invent
 #: a subject with nothing to go on.
 TOPIC_SOURCES = ("signal", "opportunity", "territory", "website")
+
+#: How many earlier posts the writer is shown to avoid repeating, and how
+#: much of each. Unbounded, a ten-post batch has its last prompt carrying
+#: nineteen full captions — expensive, and it dilutes the instruction that
+#: matters. What actually repeats is the opening, so a window of openings
+#: says more than a wall of complete posts.
+AVOID_WINDOW = 8
+AVOID_CHARS = 220
 
 
 @dataclass
@@ -75,6 +84,27 @@ class PostBatch:
     posts: list[GeneratedPost] = field(default_factory=list)
     videos: list[VideoPackage] = field(default_factory=list)
     topics_used: list[str] = field(default_factory=list)
+    #: How many of the requested items had no fresh topic left. Surfaced
+    #: rather than silently filled, because the honest answer to "make five
+    #: more" on an exhausted site is that there are not five more — not five
+    #: posts about nothing.
+    without_topic: int = 0
+    #: Whether this site has ever had a topic source at all. Running out
+    #: after covering everything and never having had anything are different
+    #: problems with different fixes, so they are not reported as one.
+    had_sources: bool = True
+
+    @property
+    def exhausted(self) -> bool:
+        """Ran out of fresh topics, having had some."""
+
+        return self.without_topic > 0 and self.had_sources
+
+    @property
+    def unresearched(self) -> bool:
+        """Never had a topic source — no site profile, no research."""
+
+        return self.without_topic > 0 and not self.had_sources
 
     def __len__(self) -> int:
         return len(self.posts) + len(self.videos)
@@ -93,6 +123,7 @@ class PostStudio:
         territory=None,
         signals=None,
         critique: bool = True,
+        ledger: Optional[TopicLedger] = None,
     ):
         self.brands = brands
         self.orchestrator = orchestrator
@@ -102,6 +133,9 @@ class PostStudio:
         self.territory = territory
         self.signals = signals
         self.critique = critique
+        # Topic memory is its own store, not a column on drafts: a video has
+        # no caption and no channel but spends a topic exactly as a post does.
+        self.ledger = ledger
         self.video_agent = VideoPackageAgent(orchestrator.reach_critic.llm)
 
     # -- context -------------------------------------------------------
@@ -111,22 +145,38 @@ class PostStudio:
         return profile.as_brief() if profile else ""
 
     def used_topics(self, brand_slug: str) -> set[str]:
-        """Topic keys this brand's earlier posts already covered."""
+        """Topic keys this site has already been written about."""
 
-        if not self.store:
-            return set()
-        return {
-            _topic_key(d.topic)
-            for d in self.store.list_for_brand(brand_slug) if d.topic
-        }
+        # The ledger is the single source of truth when there is one, so
+        # clearing it genuinely clears. Unioning it with draft history left
+        # topics blocked by old drafts after a reset, which makes a reset
+        # button that does not reset. Drafts are only a fallback for a
+        # studio wired without a ledger.
+        if self.ledger:
+            return self.ledger.used_keys(brand_slug)
+        if self.store:
+            return {_topic_key(d.topic)
+                    for d in self.store.list_for_brand(brand_slug) if d.topic}
+        return set()
 
-    def recent_captions(self, brand_slug: str, limit: int = 10) -> list[str]:
+    def _spend(self, brand_slug: str, topic: str, kind: str, source: str) -> None:
+        if self.ledger and topic:
+            self.ledger.mark(brand_slug, topic, kind=kind, source=source)
+
+    def free_topics(self, brand_slug: str) -> int:
+        """Let this site be written about from the start again."""
+
+        return self.ledger.reset(brand_slug) if self.ledger else 0
+
+    def recent_captions(self, brand_slug: str, limit: int = AVOID_WINDOW) -> list[str]:
         if not self.store:
             return []
-        return [d.caption for d in self.store.list_for_brand(brand_slug, limit=limit)
+        return [_opening(d.caption)
+                for d in self.store.list_for_brand(brand_slug, limit=limit)
                 if d.caption]
 
-    def choose_topics(self, brand_slug: str, count: int) -> list[tuple[str, str]]:
+    def choose_topics(self, brand_slug: str, count: int,
+                      allow_repeats: bool = False) -> list[tuple[str, str]]:
         """Pick ``count`` distinct topics, best source first.
 
         Returns (topic, source) pairs. Falls back to an empty topic rather
@@ -138,7 +188,7 @@ class PostStudio:
         # Seed with what this brand has already been written about, so
         # asking again moves on instead of re-offering the same ideas.
         # Without this "give me a different batch" returns the same batch.
-        seen: set[str] = set(self.used_topics(brand_slug))
+        seen: set[str] = set() if allow_repeats else set(self.used_topics(brand_slug))
 
         def take(text: str, source: str) -> None:
             key = _topic_key(_headline(text))
@@ -166,6 +216,24 @@ class PostStudio:
             chosen.append(("", "open"))
         return chosen
 
+    @staticmethod
+    def _count_open(topics: list[tuple[str, str]]) -> int:
+        return sum(1 for topic, source in topics if not topic and source == "open")
+
+    def has_sources(self, brand_slug: str) -> bool:
+        """Is there anything at all this site could be written about?"""
+
+        if self.used_topics(brand_slug):
+            return True
+        if self.signals and self.signals.live(brand_slug):
+            return True
+        if self.opportunities and self.opportunities.for_brand(brand_slug, status="open"):
+            return True
+        if self.territory and self.territory.for_brand(brand_slug):
+            return True
+        profile = self.websites.get(brand_slug) if self.websites else None
+        return bool(profile and profile.topics)
+
     # -- generation ----------------------------------------------------
 
     def _brief(self, brand: BrandProfile) -> CampaignBrief:
@@ -184,6 +252,7 @@ class PostStudio:
         count: int = 3,
         platform: Optional[str] = None,
         topic: Optional[str] = None,
+        allow_repeats: bool = False,
     ) -> PostBatch:
         """Write ``count`` posts for one site.
 
@@ -203,8 +272,9 @@ class PostStudio:
 
         website = self.website_brief(brand_slug)
         recent = self.recent_captions(brand_slug)
+        # A topic named outright always wins: asking for it IS the asking.
         topics = ([(topic, "given")] * count if topic
-                  else self.choose_topics(brand_slug, count))
+                  else self.choose_topics(brand_slug, count, allow_repeats))
 
         # One strategy for the batch: every post shares the brand's
         # positioning, and re-deriving it per post costs a call for nothing.
@@ -212,15 +282,18 @@ class PostStudio:
             self._brief(brand), topic=website
         ).output
 
-        batch = PostBatch(brand_slug=brand_slug)
+        batch = PostBatch(brand_slug=brand_slug,
+                          without_topic=self._count_open(topics),
+                          had_sources=self.has_sources(brand_slug))
         for index in range(count):
             target = targets[index % len(targets)]
             subject, source = topics[index]
             combined = "\n\n".join(p for p in (website, subject) if p)
 
+            avoid = (recent + [_opening(p.caption) for p in batch.posts])[-AVOID_WINDOW:]
             caption = self.orchestrator.draft_post(
                 self._brief(brand), strategy, target.channel, target.label,
-                recent_captions=recent + [p.caption for p in batch.posts],
+                recent_captions=avoid,
                 keyword=brand.primary_keyword, topic=combined,
                 forbidden=brand.forbidden_claims,
             ).output
@@ -246,6 +319,7 @@ class PostStudio:
             )
             batch.posts.append(post)
             batch.topics_used.append(post.topic)
+            self._spend(brand_slug, post.topic, "post", source)
 
             if self.store:
                 draft = self.store.create(
@@ -263,16 +337,19 @@ class PostStudio:
         count: int = 1,
         seconds: int = 30,
         topic: Optional[str] = None,
+        allow_repeats: bool = False,
     ) -> PostBatch:
         """Write ``count`` video packages — script, thumbnail, caption."""
 
         brand = self.brands.get(brand_slug)
         website = self.website_brief(brand_slug)
         topics = ([(topic, "given")] * count if topic
-                  else self.choose_topics(brand_slug, count))
+                  else self.choose_topics(brand_slug, count, allow_repeats))
 
-        batch = PostBatch(brand_slug=brand_slug)
-        for subject, _source in topics:
+        batch = PostBatch(brand_slug=brand_slug,
+                          without_topic=self._count_open(topics),
+                          had_sources=self.has_sources(brand_slug))
+        for subject, source in topics:
             package = self.video_agent.write(
                 brand, seconds,
                 topic=_headline(subject),
@@ -281,7 +358,15 @@ class PostStudio:
             )
             batch.videos.append(package)
             batch.topics_used.append(package.topic)
+            self._spend(brand_slug, package.topic, "video", source)
         return batch
+
+
+def _opening(caption: str) -> str:
+    """The part of a post that actually repeats — its first lines."""
+
+    text = " ".join((caption or "").split())
+    return text[:AVOID_CHARS] + ("…" if len(text) > AVOID_CHARS else "")
 
 
 def _topic_key(topic: str) -> str:

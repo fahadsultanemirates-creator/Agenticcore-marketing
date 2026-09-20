@@ -54,9 +54,20 @@ Two things make a batch useful rather than N near-identical posts:
   researched question, then an uncovered search term, then an angle the site
   itself suggests. With no source the topic is left open rather than
   invented.
-- **Asking again moves on.** Drafts record the topic they covered, so
-  "these aren't right, make new ones" returns different material instead of
-  the same ideas reshuffled.
+- **A topic is never used twice until you ask.** Every topic a site is
+  written about is spent in a shared ledger (`agenticcore/topics.py`), so
+  "these aren't right, make new ones" returns different material rather than
+  the same ideas reshuffled. Posts and videos share one ledger — a video
+  spends a topic exactly as a post does.
+
+Repetition happens only when asked for, in one of three ways: name a topic
+outright (asking for it *is* the asking), tap **Allow repeats once**, or
+**Clear topic history** for that site.
+
+When a site runs dry the batch says so instead of quietly producing posts
+about nothing — and it distinguishes two different problems: a site that has
+covered every angle the framework knows (research more, or allow repeats)
+from one that never had a topic source at all (read its website first).
 
 A topic given explicitly fixes the subject for the whole batch — what an
 announcement needs, and the opposite of what browsing for ideas needs.
@@ -435,6 +446,7 @@ agenticcore/
     website.py                   # per-site knowledge, fetched or hand-written
   video.py                   # one script + thumbnail + caption for all four destinations
   studio.py                  # PostStudio: N posts on demand, topics chosen or given
+  topics.py                  # the ledger: one topic, used once, until you say otherwise
   control.py                 # Telegram menus over the studio
   pipeline.py              # ContentPipeline: wires everything below together
   agents/
