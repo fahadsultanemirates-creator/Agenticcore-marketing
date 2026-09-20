@@ -22,6 +22,10 @@ from typing import Optional, Protocol
 #: variant instead.
 WEB_SEARCH_TOOL = "web_search_20260209"
 
+#: Claude's server-side fetch tool. Only retrieves URLs already present in
+#: the request, which is what we want: we name the pages to read.
+WEB_FETCH_TOOL = "web_fetch_20260209"
+
 
 @dataclass
 class ResearchResult:
@@ -81,6 +85,36 @@ class AnthropicResearchClient:
             tool["blocked_domains"] = self.blocked_domains
         return tool
 
+    def read_pages(self, system: str, prompt: str, max_fetches: int = 8) -> ResearchResult:
+        """Read named web pages, rather than searching for them.
+
+        Fetching runs on Anthropic's servers, so this works from hosts whose
+        own outbound access is restricted — the same reason web search does.
+        """
+
+        response = self._client.messages.create(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            system=system,
+            tools=[{"type": WEB_FETCH_TOOL, "name": "web_fetch", "max_uses": max_fetches}],
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        text = "".join(b.text for b in response.content if b.type == "text").strip()
+        sources, fetched = [], 0
+        for block in response.content:
+            if block.type == "server_tool_use" and getattr(block, "name", "") == "web_fetch":
+                fetched += 1
+            elif block.type == "web_fetch_tool_result":
+                # A failed fetch returns an error object where success
+                # returns a result, and never raises.
+                content = block.content
+                url = getattr(content, "url", None)
+                if url:
+                    sources.append(url)
+
+        return ResearchResult(text=text, sources=sources, searches_run=fetched)
+
     def research(self, system: str, prompt: str, max_searches: int = 5) -> ResearchResult:
         response = self._client.messages.create(
             model=self.model,
@@ -129,6 +163,9 @@ class OfflineResearchClient:
     def __init__(self, text: str = ""):
         self.text = text
         self.calls: list[tuple[str, str]] = []
+
+    def read_pages(self, system: str, prompt: str, max_fetches: int = 8) -> ResearchResult:
+        return self.research(system, prompt)
 
     def research(self, system: str, prompt: str, max_searches: int = 5) -> ResearchResult:
         self.calls.append((system, prompt))

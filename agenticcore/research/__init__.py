@@ -6,6 +6,12 @@ from agenticcore.research.client import (
     default_research_client,
 )
 from agenticcore.research.demand import DemandResearchAgent
+from agenticcore.research.website import (
+    WebsiteProfile,
+    WebsiteReader,
+    WebsiteStore,
+    parse_profile,
+)
 from agenticcore.research.signals import (
     KIND_COMPETITOR,
     KIND_EVENT,
@@ -53,6 +59,10 @@ __all__ = [
     "KIND_EVENT",
     "KIND_COMPETITOR",
     "KIND_TREND",
+    "WebsiteProfile",
+    "WebsiteReader",
+    "WebsiteStore",
+    "parse_profile",
     "STATUS_OPEN",
     "STATUS_USED",
     "STATUS_DROPPED",
