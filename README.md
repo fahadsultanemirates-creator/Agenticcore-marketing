@@ -26,6 +26,41 @@ CampaignAnalystAgent  --> KPIs, measurement plan, cross-deliverable critique
 CampaignPlan (Markdown-renderable)
 ```
 
+## The studio: posts on demand, nothing published
+
+The framework as a post-creation specialist. Pick a site, say how many,
+optionally say what about, get a batch to choose from. Nothing publishes and
+nothing waits on approval — you copy what you like and discard the rest.
+
+```bash
+python examples/run_studio.py --bot                       # Telegram menus
+python examples/run_studio.py agenticcore --posts 3
+python examples/run_studio.py agenticcore --posts 3 --platform telegram
+python examples/run_studio.py agenticcore --video 2 --seconds 10
+python examples/run_studio.py agenticcore --posts 3 --topic "Weekend: 30% off"
+```
+
+The Telegram bot carries the same choices as buttons — switch site, how
+many, text or video, which page, set a topic or let it decide, then
+Generate. Selection state is per chat, because Telegram allows 64 bytes of
+callback data and that will not carry a site, a count, a format and a topic
+through four menus.
+
+Two things make a batch useful rather than N near-identical posts:
+
+- **Each post gets its own topic.** Ask for five posts on one subject and a
+  model writes five rewrites; five subjects give five posts. Topics are
+  chosen first, from the best source available — a live signal, then a
+  researched question, then an uncovered search term, then an angle the site
+  itself suggests. With no source the topic is left open rather than
+  invented.
+- **Asking again moves on.** Drafts record the topic they covered, so
+  "these aren't right, make new ones" returns different material instead of
+  the same ideas reshuffled.
+
+A topic given explicitly fixes the subject for the whole batch — what an
+announcement needs, and the opposite of what browsing for ideas needs.
+
 ## Knowing the websites
 
 A post is only as good as what the writer knows. Given a one-line brand
@@ -399,6 +434,8 @@ agenticcore/
     parsing.py                  # order-independent block parsing
     website.py                   # per-site knowledge, fetched or hand-written
   video.py                   # one script + thumbnail + caption for all four destinations
+  studio.py                  # PostStudio: N posts on demand, topics chosen or given
+  control.py                 # Telegram menus over the studio
   pipeline.py              # ContentPipeline: wires everything below together
   agents/
     base.py                # BaseAgent, AgentResult, GROUNDING_RULES
@@ -424,6 +461,7 @@ brands/
 examples/
   run_campaign.py            # agent pipeline only, prints a Markdown plan
   run_pipeline.py             # full flow: generate -> Telegram approval -> publish
+  run_studio.py                # post creation only, CLI or Telegram bot
 .github/workflows/
   tests.yml                  # runs pytest on 3.10 and 3.13, no credentials
 tests/
