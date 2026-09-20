@@ -45,6 +45,10 @@ class GeneratedPost:
     topic: str = ""
     topic_source: str = ""
     reach_score: Optional[int] = None
+    #: True when the critic's rewrite replaced the original. The score is
+    #: the ORIGINAL's, so showing it unqualified next to a post that was
+    #: rewritten to fix those very problems misreads as a weak final post.
+    revised: bool = False
     first_comment: Optional[str] = None
 
     def as_telegram_message(self, index: int = 0, total: int = 0) -> str:
@@ -52,7 +56,8 @@ class GeneratedPost:
         if total:
             head = f"[{index}/{total} · {self.platform}]"
         if self.reach_score is not None:
-            head += f" reach {self.reach_score}/10"
+            head += (f" reach {self.reach_score}/10 → rewritten" if self.revised
+                     else f" reach {self.reach_score}/10")
         if self.topic:
             head += f"\n{self.topic}"
 
@@ -220,14 +225,14 @@ class PostStudio:
                 forbidden=brand.forbidden_claims,
             ).output
 
-            score = None
+            score, revised = None, False
             if self.critique:
                 verdict = self.orchestrator.critique_reach(
                     caption, target.channel, brand.primary_keyword
                 )
                 score = verdict.score
                 if verdict.should_revise:
-                    caption = verdict.revised
+                    caption, revised = verdict.revised, True
 
             caption, first_comment = split_link(caption, target.channel)
             if brand.disclaimer and brand.disclaimer not in caption:
@@ -237,7 +242,7 @@ class PostStudio:
                 id=str(uuid.uuid4()), brand_slug=brand_slug,
                 platform=target.channel, caption=caption,
                 topic=_headline(subject), topic_source=source,
-                reach_score=score, first_comment=first_comment,
+                reach_score=score, revised=revised, first_comment=first_comment,
             )
             batch.posts.append(post)
             batch.topics_used.append(post.topic)
@@ -285,16 +290,35 @@ def _topic_key(topic: str) -> str:
     return " ".join((topic or "").lower().split())[:80]
 
 
-def _headline(topic: str) -> str:
-    """The first meaningful line of a topic brief, for labelling a post."""
+#: Prefixes the topic briefs add, stripped back off for a readable label.
+_TOPIC_PREFIXES = (
+    "The question this post must answer:",
+    "React to this, while it is still current:",
+    "Answer the search",
+)
+
+
+def _headline(topic: str, limit: int = 90) -> str:
+    """A short readable label for a topic brief.
+
+    The briefs are written for a model, not for a menu, so the label keeps
+    only the first sentence and stops on a word boundary — a caption headed
+    with half a word mid-clause looks broken, and this is the line you read
+    when choosing which post to keep.
+    """
 
     for line in (topic or "").splitlines():
         cleaned = line.strip()
-        if cleaned:
-            for prefix in ("The question this post must answer:",
-                           "React to this, while it is still current:",
-                           "Answer the search"):
-                if cleaned.startswith(prefix):
-                    cleaned = cleaned[len(prefix):].strip(" :'")
-            return cleaned[:120]
+        if not cleaned:
+            continue
+        for prefix in _TOPIC_PREFIXES:
+            if cleaned.lower().startswith(prefix.lower()):
+                cleaned = cleaned[len(prefix):].lstrip(" :")
+                break
+        # Keep the subject, drop the rationale that follows it.
+        cleaned = cleaned.strip("'\" ").split("'. ")[0].split(". ")[0]
+        cleaned = cleaned.strip("'\" .")
+        if len(cleaned) > limit:
+            cleaned = cleaned[:limit].rsplit(" ", 1)[0] + "…"
+        return cleaned
     return ""

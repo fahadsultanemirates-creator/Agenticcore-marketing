@@ -230,3 +230,68 @@ def test_a_used_topic_is_recorded_on_the_draft(tmp_path):
     assert saved.topic == batch.posts[0].topic
     assert saved.topic in studio.used_topics("acme") or \
         saved.topic.lower() in {t.lower() for t in studio.used_topics("acme")}
+
+
+def test_topic_labels_are_readable_not_raw_briefs():
+    """This is the line you read when choosing which post to keep."""
+
+    from agenticcore.studio import _headline
+
+    raw = ("Answer the search 'off plan property marketing ideas'. Off-plan is the "
+           "dominant sale model in the Gulf; the phrase matches how developers search.")
+
+    label = _headline(raw)
+
+    assert label == "off plan property marketing ideas"
+    assert not label.endswith("'")
+    assert "dominant sale model" not in label
+
+
+def test_a_long_label_stops_on_a_word_boundary():
+    from agenticcore.studio import _headline
+
+    label = _headline("a " * 80)
+
+    assert label.endswith("…")
+    assert "  " not in label.replace("…", "")
+
+
+def test_an_opportunity_brief_label_drops_its_prefix():
+    from agenticcore.studio import _headline
+
+    assert _headline("The question this post must answer: what does it cost\nWhy: x") \
+        == "what does it cost"
+
+
+def test_a_rewritten_post_says_so_next_to_its_score(tmp_path):
+    """A 5/10 beside text the critic already fixed reads as a weak final post."""
+
+    class WeakThenFixed:
+        def complete(self, system, prompt):
+            if "distribution analyst" in system:
+                return "SCORE: 4\nPROBLEMS:\n- weak hook\nREVISED:\nA much stronger opening."
+            return "a weak first draft"
+
+    studio, _, _ = make_studio(tmp_path, critique=True, llm=WeakThenFixed())
+
+    post = studio.make_posts("acme", count=1, platform="telegram").posts[0]
+
+    assert post.revised is True
+    assert post.caption == "A much stronger opening."
+    assert "→ rewritten" in post.as_telegram_message()
+
+
+def test_a_kept_post_shows_its_score_plainly(tmp_path):
+    class StrongEnough:
+        def complete(self, system, prompt):
+            if "distribution analyst" in system:
+                return "SCORE: 9\nREVISED:\nnot used"
+            return "a strong first draft"
+
+    studio, _, _ = make_studio(tmp_path, critique=True, llm=StrongEnough())
+
+    post = studio.make_posts("acme", count=1, platform="telegram").posts[0]
+
+    assert post.revised is False
+    assert "reach 9/10" in post.as_telegram_message()
+    assert "rewritten" not in post.as_telegram_message()
