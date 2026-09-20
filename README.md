@@ -26,6 +26,52 @@ CampaignAnalystAgent  --> KPIs, measurement plan, cross-deliverable critique
 CampaignPlan (Markdown-renderable)
 ```
 
+## Knowing the websites
+
+A post is only as good as what the writer knows. Given a one-line brand
+description an agent reaches for generic claims, because it has nothing
+specific to say. Given the actual site it can write ten different posts that
+are all true.
+
+Two ways to supply that, and **neither re-reads on every run** — the profile
+is stored once and reused until the site changes.
+
+**Read the live site** (costs an API call, once per site):
+
+```python
+profile, _ = WebsiteReader(AnthropicResearchClient()).read("agenticcore", "https://agenticcore.agency")
+WebsiteStore().save(profile)
+```
+
+**Or write it by hand** — `brands/<slug>.website.md`, free, and the only
+option for a site that isn't live yet:
+
+```
+URL: https://example.com
+SELLS: The concrete services or products.
+PRICES: Every figure you publish. Write "not published" if you don't.
+PROOF: Named clients, results, years. Write "none stated" if there are none.
+TOPICS: post angle one | post angle two | post angle three
+```
+
+The brief tells the agents which source it came from, because "the site
+says" and "the owner told us" are different kinds of fact.
+
+Two rules make the profile safe to write from:
+
+- **A gap stays a gap.** `not published` and `none stated` are recorded as
+  given, never filled with something plausible. A missing field makes the
+  writer work around it; an invented one gets published as a false claim.
+- **No proof means an explicit warning.** A site naming no clients, results
+  or years produces a brief that tells the writer to work from reasoning and
+  specifics and never borrow credibility the business hasn't earned.
+
+Read live against `agenticcore.agency`, it came back with the site-wide
+"30% upfront, 70% on completion" policy, the position against selling
+credits, and twelve post angles including *"Why AgenticCore doesn't sell
+credits — the case against credit-based AI agencies"* — a differentiator
+nobody would invent from a description.
+
 ## Research: deciding what to say
 
 A publisher is handed a brand description and invents a topic. A marketer
@@ -351,6 +397,8 @@ agenticcore/
     territory.py               # keyword map, coverage, cluster performance
     signals.py                  # perishable events + competitor watch
     parsing.py                  # order-independent block parsing
+    website.py                   # per-site knowledge, fetched or hand-written
+  video.py                   # one script + thumbnail + caption for all four destinations
   pipeline.py              # ContentPipeline: wires everything below together
   agents/
     base.py                # BaseAgent, AgentResult, GROUNDING_RULES

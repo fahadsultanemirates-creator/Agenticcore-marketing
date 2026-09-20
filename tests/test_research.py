@@ -427,3 +427,119 @@ def test_no_signals_found_is_respected(tmp_path):
     found, _ = agent.find_events(brand())
 
     assert found == []
+
+
+# --- website profiles ---
+
+PROFILE_REPLY = """SUMMARY: A done-for-you agency run by AI agents.
+SELLS: Websites, branding, marketing, bookkeeping.
+PRICES: Packages from $150. Payment is 30% upfront, 70% on completion.
+CTA: Get started free, leading to the signup page.
+PROOF: none stated
+TONE: Plain and direct. Repeats "one clear price per service".
+TOPICS: what a $150 package includes | why we publish prices | what we refuse to build
+"""
+
+
+def test_profile_parses_its_fields_and_topics():
+    from agenticcore.research import parse_profile
+
+    p = parse_profile(PROFILE_REPLY, "acme", "https://acme.test")
+
+    assert "$150" in p.prices
+    assert p.topics == ["what a $150 package includes", "why we publish prices",
+                        "what we refuse to build"]
+
+
+def test_no_proof_reads_as_empty_so_the_warning_can_fire():
+    """'none stated' must not look like a citable proof point."""
+
+    from agenticcore.research import parse_profile
+
+    p = parse_profile(PROFILE_REPLY, "acme", "https://acme.test")
+
+    assert p.proof == ""
+    assert "NONE" in p.as_brief()
+    assert "never from credibility the business has not earned" in p.as_brief()
+
+
+def test_not_published_is_kept_because_it_is_a_real_answer():
+    from agenticcore.research import parse_profile
+
+    p = parse_profile("SELLS: Things.\nPRICES: not published\n", "a", "https://a.test")
+
+    assert p.prices == "not published"
+
+
+def test_a_hand_written_profile_needs_no_fetch(tmp_path):
+    """Works for a site that is not live yet, which a fetch cannot do at all."""
+
+    from agenticcore.research import load_profile_file, write_profile_template
+
+    path = write_profile_template("newsite", tmp_path)
+    path.write_text(
+        "# a comment that is ignored\n"
+        "URL: https://notlive.test\n"
+        "SELLS: Market data packages.\n"
+        "PROOF: none stated\n"
+        "TOPICS: one good angle here | another good angle here\n"
+    )
+
+    p = load_profile_file("newsite", tmp_path)
+
+    assert p.url == "https://notlive.test"
+    assert p.sells == "Market data packages."
+    assert len(p.topics) == 2
+    assert p.from_file
+
+
+def test_the_brief_says_where_its_facts_came_from(tmp_path):
+    """"The site says" and "the owner told us" are different kinds of fact."""
+
+    from agenticcore.research import load_profile_file, parse_profile, write_profile_template
+
+    fetched = parse_profile(PROFILE_REPLY, "acme", "https://acme.test")
+    assert "read from the live site" in fetched.as_brief()
+
+    write_profile_template("acme", tmp_path)
+    supplied = load_profile_file("acme", tmp_path)
+    assert "supplied by the owner" in supplied.as_brief()
+
+
+def test_the_template_is_never_overwritten(tmp_path):
+    from agenticcore.research import write_profile_template
+
+    path = write_profile_template("acme", tmp_path)
+    path.write_text("SELLS: my own careful notes\n")
+
+    write_profile_template("acme", tmp_path)
+
+    assert "my own careful notes" in path.read_text()
+
+
+def test_a_missing_profile_file_is_not_an_error(tmp_path):
+    from agenticcore.research import load_profile_file
+
+    assert load_profile_file("nothing-here", tmp_path) is None
+
+
+def test_store_round_trips_a_profile(tmp_path):
+    from agenticcore.research import WebsiteStore, parse_profile
+
+    store = WebsiteStore(tmp_path / "w.db")
+    store.save(parse_profile(PROFILE_REPLY, "acme", "https://acme.test"))
+
+    loaded = store.get("acme")
+
+    assert loaded.sells.startswith("Websites")
+    assert len(loaded.topics) == 3
+
+
+def test_re_reading_replaces_rather_than_duplicates(tmp_path):
+    from agenticcore.research import WebsiteStore, parse_profile
+
+    store = WebsiteStore(tmp_path / "w.db")
+    store.save(parse_profile("SELLS: old copy\n", "acme", "https://acme.test"))
+    store.save(parse_profile("SELLS: new copy\n", "acme", "https://acme.test"))
+
+    assert store.get("acme").sells == "new copy"

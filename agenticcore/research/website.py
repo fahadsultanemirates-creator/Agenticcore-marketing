@@ -64,11 +64,18 @@ class WebsiteProfile:
     topics: list[str] = field(default_factory=list)
     pages_read: list[str] = field(default_factory=list)
     read_at: str = ""
+    #: True when this came from a hand-written file rather than a fetch.
+    #: The agents are told which, because "the site says" and "the owner
+    #: told us" are different kinds of fact.
+    from_file: bool = False
 
     def as_brief(self) -> str:
         """The profile as prompt text for the writing agents."""
 
-        parts = [f"What you know about {self.url}, read from the live site:"]
+        source = ("supplied by the owner" if self.from_file
+                  else "read from the live site")
+        subject = self.url or f"the {self.brand_slug} website"
+        parts = [f"What you know about {subject}, {source}:"]
         for label, value in (
             ("What it sells", self.sells),
             ("Who it is for", self.audience),
@@ -217,3 +224,77 @@ class WebsiteStore:
             pages_read=json.loads(r["pages_read"]) if r["pages_read"] else [],
             read_at=r["read_at"],
         )
+
+
+#: A hand-written profile lives beside the brand file as
+#: ``brands/<slug>.website.md``.
+PROFILE_SUFFIX = ".website.md"
+
+PROFILE_TEMPLATE = """\
+# Website profile — written by hand, no fetching needed.
+#
+# Fill in what you know. Any field you leave blank is simply absent: the
+# writing agents work around a gap, and that is safer than a guess. Never
+# put something here you are not sure of — whatever is in this file, the
+# agents will treat as fact and may publish.
+#
+# Lines starting with # are ignored.
+
+URL: https://example.com
+
+SUMMARY: What this business is, in two or three sentences.
+
+SELLS: The concrete services or products.
+
+AUDIENCE: Who it is for, in the words they would use.
+
+OFFERS: Named packages or bundles and what each includes.
+
+PRICES: Every figure you publish, and what it buys. Write "not published" if you don't.
+
+CTA: The action you want, and how someone takes it.
+
+PROOF: Named clients, results, stats, years. Write "none stated" if there are none yet.
+
+TONE: How this brand talks. Recurring phrases worth reusing.
+
+TOPICS: Post angle one | post angle two | post angle three
+"""
+
+
+def profile_path(brand_slug: str, directory: str | Path = "brands") -> Path:
+    return Path(directory) / f"{brand_slug}{PROFILE_SUFFIX}"
+
+
+def load_profile_file(brand_slug: str, directory: str | Path = "brands") -> Optional[WebsiteProfile]:
+    """Read a hand-written profile, if one exists.
+
+    Preferred over fetching when it exists: it costs nothing, it says
+    exactly what you want said, and it works for a site that is not live
+    yet — which a fetch cannot do at all.
+    """
+
+    path = profile_path(brand_slug, directory)
+    if not path.is_file():
+        return None
+
+    text = "\n".join(
+        line for line in path.read_text().splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    fields = parse_fields(text, ("URL",) + PROFILE_LABELS)
+    profile = parse_profile(text, brand_slug, fields.get("url", ""))
+    profile.pages_read = [str(path)]
+    profile.from_file = True
+    return profile
+
+
+def write_profile_template(brand_slug: str, directory: str | Path = "brands") -> Path:
+    """Create a blank profile file to fill in. Never overwrites an existing one."""
+
+    path = profile_path(brand_slug, directory)
+    if path.is_file():
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(PROFILE_TEMPLATE)
+    return path

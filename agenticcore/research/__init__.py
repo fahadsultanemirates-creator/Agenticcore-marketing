@@ -10,7 +10,9 @@ from agenticcore.research.website import (
     WebsiteProfile,
     WebsiteReader,
     WebsiteStore,
+    load_profile_file,
     parse_profile,
+    write_profile_template,
 )
 from agenticcore.research.signals import (
     KIND_COMPETITOR,
@@ -63,6 +65,8 @@ __all__ = [
     "WebsiteReader",
     "WebsiteStore",
     "parse_profile",
+    "load_profile_file",
+    "write_profile_template",
     "STATUS_OPEN",
     "STATUS_USED",
     "STATUS_DROPPED",
