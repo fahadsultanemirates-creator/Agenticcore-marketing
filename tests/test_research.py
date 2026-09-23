@@ -543,3 +543,14 @@ def test_re_reading_replaces_rather_than_duplicates(tmp_path):
     store.save(parse_profile("SELLS: new copy\n", "acme", "https://acme.test"))
 
     assert store.get("acme").sells == "new copy"
+
+
+def test_the_research_client_does_not_wait_ten_minutes():
+    """A call that will work finishes in minutes; longer is a stuck prompt."""
+
+    import agenticcore.research.client as client_module
+
+    import inspect
+    signature = inspect.signature(client_module.AnthropicResearchClient.__init__)
+
+    assert signature.parameters["timeout"].default <= 300

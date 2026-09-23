@@ -62,14 +62,21 @@ class AnthropicResearchClient:
         max_tokens: int = 16000,
         allowed_domains: Optional[list[str]] = None,
         blocked_domains: Optional[list[str]] = None,
+        timeout: float = 240.0,
     ):
         import anthropic
 
         self.model = model or os.environ.get("AGENTICCORE_MODEL", "claude-sonnet-5")
         self.max_tokens = max_tokens
+        # The SDK waits ten minutes by default. A research call that is
+        # going to work finishes in two or three, so a longer wait is not
+        # patience — it is sitting in front of a blank prompt with no way to
+        # tell a slow call from a stuck one.
+        self.timeout = timeout
         self.allowed_domains = allowed_domains
         self.blocked_domains = blocked_domains
-        self._client = anthropic.Anthropic(api_key=api_key)
+        self._client = anthropic.Anthropic(api_key=api_key, timeout=timeout,
+                                           max_retries=1)
 
     def _tool(self, max_searches: int) -> dict:
         tool: dict = {
@@ -85,13 +92,17 @@ class AnthropicResearchClient:
             tool["blocked_domains"] = self.blocked_domains
         return tool
 
-    def read_pages(self, system: str, prompt: str, max_fetches: int = 8) -> ResearchResult:
+    def read_pages(self, system: str, prompt: str, max_fetches: int = 8,
+                   verbose: bool = True) -> ResearchResult:
         """Read named web pages, rather than searching for them.
 
         Fetching runs on Anthropic's servers, so this works from hosts whose
         own outbound access is restricted — the same reason web search does.
         """
 
+        if verbose:
+            print(f"  reading up to {max_fetches} page(s), "
+                  f"timeout {self.timeout:.0f}s…", flush=True)
         response = self._client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
@@ -115,7 +126,11 @@ class AnthropicResearchClient:
 
         return ResearchResult(text=text, sources=sources, searches_run=fetched)
 
-    def research(self, system: str, prompt: str, max_searches: int = 5) -> ResearchResult:
+    def research(self, system: str, prompt: str, max_searches: int = 5,
+                 verbose: bool = True) -> ResearchResult:
+        if verbose:
+            print(f"  searching (up to {max_searches}), "
+                  f"timeout {self.timeout:.0f}s…", flush=True)
         response = self._client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
