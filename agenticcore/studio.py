@@ -24,7 +24,7 @@ from typing import Optional
 
 from agenticcore.brands import MEDIA_VIDEO, BrandProfile
 from agenticcore.orchestrator import CampaignBrief
-from agenticcore.reach import split_link
+from agenticcore.reach import LINK_FIRST_COMMENT, rules_for, split_link
 from agenticcore.topics import TopicLedger, topic_key
 from agenticcore.video import VideoPackage, VideoPackageAgent
 
@@ -236,6 +236,29 @@ class PostStudio:
 
     # -- generation ----------------------------------------------------
 
+    #: Phrasings a writer uses to promise a link it did not actually write.
+    _LINK_PROMISES = ("first comment", "link below", "link in the comments",
+                      "comment below for the link", "link in bio")
+
+    def _promised_link(self, brand_slug: str, platform: str, caption: str,
+                       found: Optional[str]) -> Optional[str]:
+        """Supply the site URL when a post promises a link but carries none.
+
+        On platforms where a link in the body costs reach, the writer is
+        told to point at the first comment — and it often writes that
+        sentence without ever including a URL. The post then makes a promise
+        the output cannot keep, and you would have to remember the link
+        yourself every time. Where the site is known, fill it in.
+        """
+
+        if found or rules_for(platform).link_policy != LINK_FIRST_COMMENT:
+            return found
+        lowered = caption.lower()
+        if not any(phrase in lowered for phrase in self._LINK_PROMISES):
+            return None
+        profile = self.websites.get(brand_slug) if self.websites else None
+        return profile.url if profile and profile.url else None
+
     def _brief(self, brand: BrandProfile) -> CampaignBrief:
         return CampaignBrief(
             product=brand.name, audience=brand.audience,
@@ -308,6 +331,9 @@ class PostStudio:
                     caption, revised = verdict.revised, True
 
             caption, first_comment = split_link(caption, target.channel)
+            first_comment = self._promised_link(
+                brand_slug, target.channel, caption, first_comment
+            )
             if brand.disclaimer and brand.disclaimer not in caption:
                 caption = f"{caption}\n\n{brand.disclaimer}"
 

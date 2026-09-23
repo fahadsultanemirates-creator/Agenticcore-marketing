@@ -399,3 +399,55 @@ def test_freeing_topics_starts_the_site_over(tmp_path):
     studio.free_topics("acme")
 
     assert studio.ledger.used_keys("acme") == set()
+
+
+def test_a_promised_first_comment_link_is_supplied(tmp_path):
+    """The post said "link is in the first comment" and shipped no link."""
+
+    class PromisesALinkWithoutOne:
+        def complete(self, system, prompt):
+            return "A good post about the thing.\n\nLink to talk it through is in the first comment."
+
+    studio, _, _ = make_studio(tmp_path, llm=PromisesALinkWithoutOne())
+
+    post = studio.make_posts("acme", count=1, platform="facebook").posts[0]
+
+    assert post.first_comment == "https://acme.test"
+
+
+def test_a_real_link_still_wins_over_the_site_url(tmp_path):
+    class WritesItsOwnLink:
+        def complete(self, system, prompt):
+            return "A post. See https://acme.test/offer — link in the first comment."
+
+    studio, _, _ = make_studio(tmp_path, llm=WritesItsOwnLink())
+
+    post = studio.make_posts("acme", count=1, platform="facebook").posts[0]
+
+    assert post.first_comment == "https://acme.test/offer"
+
+
+def test_a_post_promising_nothing_gets_no_link(tmp_path):
+    """Don't attach a link to a post that never offered one."""
+
+    class NoPromise:
+        def complete(self, system, prompt):
+            return "A post that simply makes its point and stops."
+
+    studio, _, _ = make_studio(tmp_path, llm=NoPromise())
+
+    post = studio.make_posts("acme", count=1, platform="facebook").posts[0]
+
+    assert post.first_comment is None
+
+
+def test_telegram_gets_no_first_comment_because_links_are_fine_there(tmp_path):
+    class PromisesALinkWithoutOne:
+        def complete(self, system, prompt):
+            return "A post.\n\nLink is in the first comment."
+
+    studio, _, _ = make_studio(tmp_path, llm=PromisesALinkWithoutOne())
+
+    post = studio.make_posts("acme", count=1, platform="telegram").posts[0]
+
+    assert post.first_comment is None
