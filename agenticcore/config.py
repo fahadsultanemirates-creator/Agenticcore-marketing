@@ -29,8 +29,12 @@ def load_env(path: str | Path = ".env", override: bool = False) -> dict[str, str
     if not env_path.is_file():
         return {}
 
+    # utf-8-sig strips a byte-order mark if one is there. PowerShell's
+    # Set-Content writes one by default, which would otherwise turn the
+    # first key into "\ufeffANTHROPIC_API_KEY" — a variable nothing reads,
+    # failing as if the key were simply missing.
     loaded: dict[str, str] = {}
-    for raw_line in env_path.read_text().splitlines():
+    for raw_line in env_path.read_text(encoding="utf-8-sig").splitlines():
         parsed = _parse_line(raw_line)
         if parsed is None:
             continue

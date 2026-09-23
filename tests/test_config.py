@@ -54,3 +54,15 @@ def test_real_environment_wins_unless_override(tmp_path, isolated_env):
 
 def test_missing_file_is_not_an_error(tmp_path, isolated_env):
     assert load_env(tmp_path / "nope.env") == {}
+
+
+def test_a_byte_order_mark_does_not_hide_the_first_key(tmp_path, isolated_env):
+    """PowerShell's Set-Content writes one by default."""
+
+    env = tmp_path / ".env"
+    env.write_bytes("ANTHROPIC_API_KEY=sk-test\nTELEGRAM_CHAT_ID=123\n".encode("utf-8-sig"))
+
+    loaded = load_env(env)
+
+    assert loaded["ANTHROPIC_API_KEY"] == "sk-test"
+    assert "﻿ANTHROPIC_API_KEY" not in loaded
