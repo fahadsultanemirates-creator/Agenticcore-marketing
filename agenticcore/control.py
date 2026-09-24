@@ -23,12 +23,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+from agenticcore.video import length_label
+
 #: Offered counts. Small numbers first because three good posts you will
 #: actually read beats ten you skim — the point of a batch is choice, not
 #: volume, and a batch too big to read carefully is worse than a small one.
 POST_COUNTS = (1, 2, 3, 5)
 VIDEO_COUNTS = (1, 2, 3)
-VIDEO_LENGTHS = (10, 30, 60)
+#: Offered script lengths, in seconds. Beyond four minutes a social video
+#: is a different medium with different retention maths, and nothing in
+#: this framework is tuned for it.
+VIDEO_LENGTHS = (10, 30, 60, 120, 180, 240)
 
 #: Drawn above each item so a batch reads as separate posts rather than one
 #: wall. Telegram stacks consecutive messages from the same sender with
@@ -64,7 +69,7 @@ class Selection:
         parts = [brand_name or self.brand_slug or "no site",
                  page_label or self.platform or "no page"]
         if self.is_video:
-            parts.append(f"{self.count} × {self.seconds}s video")
+            parts.append(f"{self.count} × {length_label(self.seconds)} video")
         else:
             parts.append(f"{self.count} post(s)")
         parts.append(f"topic: {self.topic}" if self.topic else "topic: framework decides")
@@ -162,9 +167,12 @@ class ControlBot:
         )
 
     def length_menu(self, chat_id: str) -> None:
+        # Two rows: six buttons on one row are unreadably narrow on a phone.
+        half = len(VIDEO_LENGTHS) // 2
         self.send(
             chat_id, "How long?",
-            rows([button(f"{s}s", f"secs:{s}") for s in VIDEO_LENGTHS],
+            rows([button(length_label(s), f"secs:{s}") for s in VIDEO_LENGTHS[:half]],
+                 [button(length_label(s), f"secs:{s}") for s in VIDEO_LENGTHS[half:]],
                  [button("Back", "menu:main")]),
         )
 
@@ -300,7 +308,7 @@ class ControlBot:
                 for i, package in enumerate(batch.videos, 1):
                     self.send(chat_id, _heading(
                         f"VIDEO {i} of {total}", label,
-                        f"{package.seconds}s", topic=package.topic), None)
+                        length_label(package.seconds), topic=package.topic), None)
                     for message in package.as_telegram_messages():
                         self.send(chat_id, message, None)
                     for warning in package.warnings():

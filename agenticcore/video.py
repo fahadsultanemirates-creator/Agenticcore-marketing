@@ -123,7 +123,31 @@ class VideoPackage:
             )
         if not self.script.strip():
             problems.append("No script came back.")
+        problems.extend(self._length_vs_platform())
         return problems
+
+    def _length_vs_platform(self) -> list[str]:
+        """Flag a clip too long for the page's short-form surface.
+
+        Not an error — it will still post. But a 4-minute clip on YouTube
+        is not a Short, and a Short and a regular upload are ranked by
+        different systems against different catalogues. Worth knowing
+        before you shoot it rather than after.
+        """
+
+        if not self.platform:
+            return []
+        from agenticcore.reach import rules_for
+
+        limit = rules_for(self.platform).short_form_max
+        if not limit or self.seconds <= limit:
+            return []
+        return [
+            f"{length_label(self.seconds)} is past {self.platform}'s "
+            f"short-form limit of {length_label(limit)}, so this posts as a "
+            f"regular video, not a Short/Reel — different feed, different "
+            f"competition. Fine if that is what you want."
+        ]
 
     def as_telegram_messages(self) -> list[str]:
         """The package split the way it gets used: one message per paste.
@@ -186,9 +210,10 @@ def parse_package(text: str, brand_slug: str, seconds: int, topic: str = "",
 def _shape_for(seconds: int) -> str:
     """The structural brief for a given length.
 
-    Ten seconds and sixty are different forms, not the same script trimmed —
-    a 60-second script cut to 10 loses its payoff, and a 10-second idea
-    stretched to 60 is padding.
+    Ten seconds and four minutes are different forms, not the same script
+    trimmed or padded — a 60-second script cut to 10 loses its payoff, and
+    a 10-second idea stretched to 4 minutes is four minutes of nothing.
+    Each tier below is a shape a writer can actually fill at that length.
     """
 
     if seconds <= 15:
@@ -201,11 +226,47 @@ def _shape_for(seconds: int) -> str:
             "Hook, one concrete example, payoff. Room for a single specific "
             "detail — a number from the brief, a named situation — and nothing more."
         )
+    if seconds <= 60:
+        return (
+            "Hook, brief setup, three beats that build, then a close that lands. "
+            "The hook still has to work in the first two seconds; the extra length "
+            "buys depth, not a slower start."
+        )
+    if seconds <= 120:
+        return (
+            "Hook, then ONE question answered properly: the situation, what "
+            "most people do, why it fails, what to do instead, and a close. "
+            "Two minutes is enough to be genuinely useful about one thing and "
+            "nowhere near enough for two — resist the second topic. Re-hook "
+            "around the halfway mark with a concrete example, because that is "
+            "where people leave."
+        )
+    if seconds <= 180:
+        return (
+            "Hook, then a walkthrough in three clearly separate stages, each "
+            "with its own small payoff so leaving early still leaves something "
+            "behind. Name each stage out loud as you reach it — spoken "
+            "signposts are what stop a three-minute video feeling like a "
+            "monologue. Close by restating what changed, not by summarising."
+        )
     return (
-        "Hook, brief setup, three beats that build, then a close that lands. "
-        "The hook still has to work in the first two seconds; the extra length "
-        "buys depth, not a slower start."
+        "Hook, then a full walkthrough in four or five stages, each announced "
+        "out loud and each ending on something the viewer could act on alone. "
+        "At this length the enemy is drift: every stage must visibly advance "
+        "the same single question set up in the hook, and anything that would "
+        "work equally well in a different video does not belong. Re-hook at "
+        "each stage boundary — state what is still unresolved. Close on the "
+        "difference between where the viewer started and where they now are."
     )
+
+
+def length_label(seconds: int) -> str:
+    """How a length reads on a button: 10s, 30s, 1m, 2m 30s."""
+
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, rest = divmod(seconds, 60)
+    return f"{minutes}m" if not rest else f"{minutes}m {rest}s"
 
 
 #: How the caption is framed when the package is for one named page,

@@ -3,6 +3,7 @@ import pytest
 from agenticcore.brands import BrandProfile
 from agenticcore.llm import EchoLLMClient
 from agenticcore.video import (
+    length_label,
     THUMBNAIL_MAX_WORDS,
     YOUTUBE_TITLE_CHARS,
     VideoPackage,
@@ -140,3 +141,68 @@ def test_the_agent_asks_for_a_word_count_matching_the_slot():
     assert "pricing" in llm.prompt
     assert "Sells websites." in llm.prompt
     assert "any guaranteed result" in llm.prompt
+
+
+class TestLongerFormats:
+    def test_each_offered_length_gets_its_own_shape(self):
+        """A 4-minute script is a different form, not a padded 30-second one."""
+
+        shapes = {s: _shape_for(s) for s in (10, 30, 60, 120, 180, 240)}
+
+        assert len(set(shapes.values())) == 6
+
+    def test_the_longer_shapes_all_carry_a_retention_device(self):
+        """Past a minute, something has to earn the next thirty seconds.
+
+        Which device differs by length — a mid-point re-hook at two
+        minutes, named stages at three — but a long shape with none of
+        them is just a short one padded out.
+        """
+
+        devices = ("re-hook", "signpost", "small payoff")
+        for seconds in (120, 180, 240):
+            shape = _shape_for(seconds).lower()
+            assert any(d in shape for d in devices), seconds
+
+    def test_the_word_target_scales_with_the_slot(self):
+        class Recording:
+            def __init__(self): self.prompt = ""
+            def complete(self, system, prompt):
+                self.prompt = prompt
+                return "SCRIPT: x\nTHUMBNAIL: a b c\nTITLE: t\nBRIEF: b\nHASHTAGS: h"
+
+        llm = Recording()
+        brand = BrandProfile.from_dict({"slug": "a", "name": "Acme",
+                                        "audience": "Brokers"})
+        VideoPackageAgent(llm).write(brand, 240)
+
+        assert "600 spoken words" in llm.prompt
+
+    def test_labels_read_as_minutes_past_sixty_seconds(self):
+        assert length_label(10) == "10s"
+        assert length_label(60) == "1m"
+        assert length_label(240) == "4m"
+        assert length_label(90) == "1m 30s"
+
+
+class TestShortFormLimits:
+    def _package(self, seconds, platform):
+        return VideoPackage("acme", seconds, script="word " * int(seconds * 2.5),
+                            platform=platform)
+
+    def test_four_minutes_on_youtube_is_flagged_as_not_a_short(self):
+        warnings = " ".join(self._package(240, "youtube").warnings())
+
+        assert "short-form limit" in warnings and "3m" in warnings
+
+    def test_three_minutes_on_youtube_is_still_a_short(self):
+        assert not any("short-form" in w
+                       for w in self._package(180, "youtube").warnings())
+
+    def test_tiktok_tolerates_four_minutes_without_complaint(self):
+        assert not any("short-form" in w
+                       for w in self._package(240, "tiktok").warnings())
+
+    def test_a_package_with_no_named_page_is_not_flagged(self):
+        assert not any("short-form" in w
+                       for w in self._package(240, "").warnings())

@@ -60,6 +60,12 @@ class PlatformReach:
     hashtag_range: tuple[int, int]
     #: Format that currently reaches furthest here.
     best_format: str
+    #: Longest a clip can be and still be treated as short-form by this
+    #: platform's dedicated surface (Shorts, Reels, the For You feed).
+    #: Past it the video still posts — it is just ranked as ordinary
+    #: long-form, against a different and much older catalogue. Zero means
+    #: the platform has no such surface.
+    short_form_max: int = 0
     #: Whether in-platform search is a meaningful discovery route, which
     #: makes keyword placement worth more than hashtags.
     search_matters: bool = False
@@ -77,7 +83,7 @@ REACH_RULES: dict[str, PlatformReach] = {
         platform="tiktok", discovery=DISCOVERY_ALGORITHMIC,
         hook_chars=90, body_target_chars=300,
         link_policy=LINK_NOT_CLICKABLE, hashtag_range=(3, 5),
-        best_format="vertical video", search_matters=True,
+        best_format="vertical video", short_form_max=600, search_matters=True,
         notes="First 2 seconds decide. Completion rate is the dominant signal. "
               "Say the keyword out loud and put it on screen — TikTok search is "
               "a real discovery route and it compounds long after the feed moves on.",
@@ -86,7 +92,7 @@ REACH_RULES: dict[str, PlatformReach] = {
         platform="instagram", discovery=DISCOVERY_ALGORITHMIC,
         hook_chars=125, body_target_chars=800,
         link_policy=LINK_NOT_CLICKABLE, hashtag_range=(3, 5),
-        best_format="reel", search_matters=True,
+        best_format="reel", short_form_max=180, search_matters=True,
         notes="Reels reach non-followers; static feed posts largely do not. "
               "Sends and saves outweigh likes. Keywords in the caption feed "
               "in-app search.",
@@ -95,7 +101,7 @@ REACH_RULES: dict[str, PlatformReach] = {
         platform="youtube", discovery=DISCOVERY_ALGORITHMIC,
         hook_chars=100, body_target_chars=5000,
         link_policy=LINK_IN_BODY_OK, hashtag_range=(2, 3),
-        best_format="short (vertical video)", search_matters=True,
+        best_format="short (vertical video)", short_form_max=180, search_matters=True,
         notes="Both a feed and the second-largest search engine. Shorts carry "
               "new channels; keyword-led titles keep earning views for months.",
     ),
@@ -113,7 +119,7 @@ REACH_RULES: dict[str, PlatformReach] = {
         platform="facebook", discovery=DISCOVERY_GRAPH,
         hook_chars=125, body_target_chars=500,
         link_policy=LINK_FIRST_COMMENT, hashtag_range=(2, 3),
-        best_format="native video",
+        best_format="native video", short_form_max=90,
         notes="Page reach is structurally low and links are suppressed to keep "
               "people on-platform. Native video travels furthest.",
     ),
@@ -130,7 +136,7 @@ REACH_RULES: dict[str, PlatformReach] = {
         platform="snapchat", discovery=DISCOVERY_ALGORITHMIC,
         hook_chars=80, body_target_chars=250,
         link_policy=LINK_NOT_CLICKABLE, hashtag_range=(1, 2),
-        best_format="vertical video",
+        best_format="vertical video", short_form_max=60,
     ),
     "pinterest": PlatformReach(
         platform="pinterest", discovery=DISCOVERY_ALGORITHMIC,
