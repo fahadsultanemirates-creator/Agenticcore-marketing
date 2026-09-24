@@ -5,7 +5,8 @@ import pytest
 
 from agenticcore.brands import BrandRegistry
 from agenticcore.control import (
-    MAX_MESSAGE_CHARS, ControlBot, Selection, TelegramTransport, _split_message,
+    DIVIDER, MAX_MESSAGE_CHARS, ControlBot, Selection, TelegramTransport,
+    _split_message,
 )
 from agenticcore.llm import EchoLLMClient
 from agenticcore.orchestrator import MarketingOrchestrator
@@ -68,9 +69,11 @@ def test_the_main_menu_offers_every_choice(tmp_path):
     bot.main_menu("1")
 
     buttons = labels(sent[-1][2])
-    for expected in ("Switch site", "Text posts", "Video", "How many",
-                     "Which page", "Set a topic", "Let it decide", "Generate"):
+    for expected in ("Switch site", "How many", "Which page",
+                     "Set a topic", "Let it decide", "Generate"):
         assert expected in buttons
+    # Format is not a question any more — the page answers it.
+    assert "Text posts" not in buttons and "Video" not in buttons
 
 
 def test_switching_site_lists_the_brands(tmp_path):
@@ -87,7 +90,8 @@ def test_choosing_a_site_is_remembered(tmp_path):
     bot.on_action("1", "site:beta")
 
     assert bot.selection("1").brand_slug == "beta"
-    assert "Beta" in sent[-1][1]
+    # Straight on to picking a page, since a run needs one.
+    assert "Which page?" in sent[-1][1]
 
 
 def test_switching_site_clears_a_page_that_may_not_exist_there(tmp_path):
@@ -108,24 +112,50 @@ def test_count_can_be_three_without_making_ten(tmp_path):
     assert bot.selection("1").count == 3
 
 
-def test_choosing_video_asks_for_a_length(tmp_path):
+def test_picking_a_video_page_switches_the_run_to_video(tmp_path):
     bot, sent = make_bot(tmp_path)
+    bot.on_action("1", "site:acme")
 
-    bot.on_action("1", "kind:video")
+    bot.on_action("1", "plat:tiktok")
 
-    assert bot.selection("1").kind == "video"
-    assert {"10s", "30s", "60s"} <= set(labels(sent[-1][2]))
+    assert bot.selection("1").is_video is True
+    # The length question appears only once a video page is chosen.
+    assert "How long" in labels(sent[-1][2])
 
 
-def test_the_page_menu_offers_only_text_pages(tmp_path):
+def test_picking_a_text_page_hides_the_length_question(tmp_path):
+    bot, sent = make_bot(tmp_path)
+    bot.on_action("1", "site:acme")
+
+    bot.on_action("1", "plat:facebook")
+
+    assert bot.selection("1").is_video is False
+    assert "How long" not in labels(sent[-1][2])
+
+
+def test_the_page_menu_offers_every_page_marked_text_or_video(tmp_path):
     bot, sent = make_bot(tmp_path)
     bot.on_action("1", "site:acme")
 
     bot.on_action("1", "menu:platform")
 
     buttons = labels(sent[-1][2])
-    assert "Acme FB" in buttons and "Acme Channel" in buttons
-    assert "Acme TikTok" not in buttons  # video page, not a text destination
+    assert "Acme FB — text" in buttons
+    assert "Acme Channel — text" in buttons
+    assert "Acme TikTok — video" in buttons
+    # One page per run, so there is nothing to generate everywhere at once.
+    assert not any("All" in b for b in buttons)
+
+
+def test_generating_without_a_page_asks_for_one(tmp_path):
+    bot, sent = make_bot(tmp_path)
+    bot.selection("1").brand_slug = "acme"
+    sent.clear()
+
+    bot.on_action("1", "go")
+
+    assert "Pick a page first." in sent[0][1]
+    assert "Which page?" in sent[-1][1]
 
 
 def test_a_topic_typed_as_a_message_is_captured(tmp_path):
@@ -158,26 +188,25 @@ def test_generating_without_a_site_asks_for_one(tmp_path):
 def test_generating_sends_one_message_per_post(tmp_path):
     bot, sent = make_bot(tmp_path)
     bot.on_action("1", "site:acme")
+    bot.on_action("1", "plat:facebook")
     bot.on_action("1", "count:3")
     sent.clear()
 
     bot.on_action("1", "go")
 
-    # The first message is "Working on ...", the last is the follow-up menu.
-    # Each post arrives as a label message plus the caption on its own, so
-    # the caption can be copied without a header to strip off it.
-    labels = [t for _, t, _ in sent if re.match(r"^\[\d+/\d+ · ", t)]
-    assert len(labels) == 3
-    # A label is only ever a label: nothing you would paste shares a
-    # message with it, so Copy on the caption yields the caption.
-    assert all(len(t.splitlines()) <= 2 for t in labels)
+    # Each post is a ruled heading plus the caption on its own, so the
+    # caption can be copied without a header to strip off it.
+    heads = [t for _, t, _ in sent if t.startswith(DIVIDER)]
+    assert [h.splitlines()[1].split(" · ")[0] for h in heads] == [
+        "POST 1 of 3", "POST 2 of 3", "POST 3 of 3"]
+    assert all("Acme FB" in h for h in heads)
     assert any("Copy what you want" in t for _, t, _ in sent)
 
 
 def test_a_video_run_sends_the_three_pieces_separately(tmp_path):
     bot, sent = make_bot(tmp_path, llm=ScriptedLLM())
     bot.on_action("1", "site:acme")
-    bot.on_action("1", "kind:video")
+    bot.on_action("1", "plat:tiktok")
     bot.on_action("1", "secs:10")
     bot.on_action("1", "count:1")
     sent.clear()
@@ -185,8 +214,11 @@ def test_a_video_run_sends_the_three_pieces_separately(tmp_path):
     bot.on_action("1", "go")
 
     texts = [t for _, t, _ in sent]
-    assert any("SCRIPT" in t for t in texts)
-    assert any("THUMBNAIL TEXT" in t for t in texts)
+    assert any(t.startswith(DIVIDER) and "VIDEO 1 of 1" in t for t in texts)
+    # Upload order: what you say, what you paste, what goes on the cover.
+    order = [t for t in texts if t[:2] in ("1.", "2.", "3.")]
+    assert [o.split(" — ")[0] for o in order] == [
+        "1. SCRIPT", "2. DESCRIPTION", "3. THUMBNAIL TEXT"]
 
 
 def test_two_chats_keep_separate_selections(tmp_path):
@@ -204,6 +236,7 @@ def test_a_failed_generation_leaves_the_menu_usable(tmp_path):
 
     bot, sent = make_bot(tmp_path)
     bot.on_action("1", "site:acme")
+    bot.on_action("1", "plat:facebook")
     bot.studio.make_posts = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
     sent.clear()
 
@@ -268,6 +301,7 @@ def test_a_site_with_no_topics_yet_is_told_so_not_told_it_is_exhausted(tmp_path)
     bot, sent = make_bot(tmp_path)
     bot.studio.websites = None          # no site profile at all
     bot.on_action("1", "site:acme")
+    bot.on_action("1", "plat:facebook")
     sent.clear()
 
     bot.on_action("1", "go")
@@ -280,6 +314,7 @@ def test_a_site_with_no_topics_yet_is_told_so_not_told_it_is_exhausted(tmp_path)
 def test_an_exhausted_site_offers_repeats_and_a_reset(tmp_path):
     bot, sent = make_bot(tmp_path)
     bot.on_action("1", "site:acme")
+    bot.on_action("1", "plat:facebook")
     bot.on_action("1", "count:10")
     bot.on_action("1", "go")      # burns 10 of 12
     bot.on_action("1", "go")      # burns the rest and runs dry

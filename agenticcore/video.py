@@ -51,6 +51,25 @@ class VideoPackage:
     brief: str = ""
     hashtags: list[str] = field(default_factory=list)
     topic: str = ""
+    #: Which page this package was written for. Empty means it was written
+    #: to the tightest common denominator and suits all of them.
+    platform: str = ""
+
+    @property
+    def title_limit(self) -> int:
+        """The first line's character budget on this package's page.
+
+        YouTube's Shorts title is the tightest at 100 characters; where a
+        package is written for one page, that page's own truncation point
+        is what matters instead.
+        """
+
+        if not self.platform:
+            return YOUTUBE_TITLE_CHARS
+        from agenticcore.reach import rules_for
+
+        return min(YOUTUBE_TITLE_CHARS, rules_for(self.platform).hook_chars) \
+            if self.platform == "youtube" else rules_for(self.platform).hook_chars
 
     @property
     def title_line(self) -> str:
@@ -116,30 +135,28 @@ class VideoPackage:
         are their own messages; the thing you copy is alone in its.
         """
 
-        header = f"{self.seconds}s video"
-        if self.topic:
-            header += f" — {self.topic}"
-
-        messages = [f"[{header}]\nSCRIPT — read aloud:", self.script.strip()]
-        if self.thumbnail_text:
-            messages.append(
-                f"THUMBNAIL TEXT — {len(self.thumbnail_text.split())} words:")
-            messages.append(self.thumbnail_text.strip())
+        messages = ["1. SCRIPT — the words to say:", self.script.strip()]
         if self.brief:
             body = self.brief.strip()
             if self.hashtags:
                 body += "\n\n" + " ".join(self.hashtags)
             messages.append(
-                f"CAPTION — first line is the YouTube title "
-                f"({len(self.title_line)}/{YOUTUBE_TITLE_CHARS} chars):")
+                f"2. DESCRIPTION — paste in the caption box "
+                f"(first line = title, {len(self.title_line)}/{self.title_limit} chars):")
             messages.append(body)
+        if self.thumbnail_text:
+            messages.append(
+                f"3. THUMBNAIL TEXT — on the cover frame "
+                f"({len(self.thumbnail_text.split())} words):")
+            messages.append(self.thumbnail_text.strip())
         return messages
 
 
 PACKAGE_LABELS = ("SCRIPT", "THUMBNAIL", "TITLE", "BRIEF", "HASHTAGS")
 
 
-def parse_package(text: str, brand_slug: str, seconds: int, topic: str = "") -> VideoPackage:
+def parse_package(text: str, brand_slug: str, seconds: int, topic: str = "",
+                  platform: str = "") -> VideoPackage:
     """Read a package out of the video agent's reply."""
 
     fields = parse_fields(text, PACKAGE_LABELS)
@@ -162,6 +179,7 @@ def parse_package(text: str, brand_slug: str, seconds: int, topic: str = "") -> 
         brief=brief,
         hashtags=hashtags[:5],
         topic=topic,
+        platform=platform,
     )
 
 
@@ -190,25 +208,38 @@ def _shape_for(seconds: int) -> str:
     )
 
 
+#: How the caption is framed when the package is for one named page,
+#: replacing the write-once-for-everywhere instruction.
+_ONE_PAGE = (
+    "How this is actually used: this video goes to {platform}, and the "
+    "caption is written for {platform} specifically — not to a lowest "
+    "common denominator. The script would work on any of them; the caption "
+    "is tuned to this one.\n\n"
+    "{reach}\n\n"
+)
+
+_EVERY_PAGE = (
+    "How this is actually used: the same video goes to all four "
+    "destinations. You write ONE script, ONE thumbnail line and ONE caption "
+    "that works everywhere. Do not write per-platform variants.\n\n"
+)
+
 VIDEO_SYSTEM = (
     "You write short vertical video for TikTok, Instagram Reels, Facebook "
     "Reels and YouTube Shorts, plus the two things that get pasted at upload "
     "time.\n\n"
-    "How this is actually used: the same video goes to all four "
-    "destinations. You write ONE script, ONE thumbnail line and ONE caption "
-    "that works everywhere. Do not write per-platform variants.\n\n"
+    "{usage}"
     "SCRIPT — only the words spoken aloud. No scene directions, no camera "
     "notes, no speaker labels, no emoji, no hashtags, no markdown. It will "
     "be read verbatim, so anything that is not speech ends up being said.\n\n"
     "THUMBNAIL — 3 to 6 words, burned onto the cover frame. It has to make "
     "sense with no other context and read at a glance on a phone. Not a "
     "sentence, not a summary — the sharpest phrase in the video.\n\n"
-    "TITLE — under 100 CHARACTERS, hard limit. This is the YouTube Shorts "
-    "title and also the first line of the caption everywhere else, so it "
-    "must stand alone. Count the characters.\n\n"
-    "BRIEF — two or three sentences of caption under the title. Written once "
-    "to fit the tightest destination, so keep it short.\n\n"
-    "HASHTAGS — 3 to 5, lowercase, no hash symbol needed.\n\n"
+    "TITLE — under {title_chars} CHARACTERS, hard limit. It is the first "
+    "line of the caption and has to stand alone, because it is all that "
+    "shows before the caption truncates. Count the characters.\n\n"
+    "BRIEF — {brief_len} of caption under the title.\n\n"
+    "HASHTAGS — {tags}, lowercase, no hash symbol needed.\n\n"
     "The first two seconds decide whether anyone sees the rest, so the first "
     "spoken line is the whole game. Open on the viewer's problem, never on "
     "the brand's name.\n\n"
@@ -217,8 +248,31 @@ VIDEO_SYSTEM = (
     "THUMBNAIL: <3-6 words>\n"
     "TITLE: <under 100 characters>\n"
     "BRIEF: <two or three sentences>\n"
-    "HASHTAGS: <3-5, comma separated>"
+    "HASHTAGS: <{tags}, comma separated>"
 )
+
+
+def _video_system(platform: str = "") -> str:
+    """The system prompt, sized to one page or to all of them."""
+
+    from agenticcore.reach import brief_for_agent, rules_for
+
+    if not platform:
+        return VIDEO_SYSTEM.format(
+            usage=_EVERY_PAGE, title_chars=YOUTUBE_TITLE_CHARS,
+            brief_len="two or three sentences", tags="3-5",
+        )
+
+    r = rules_for(platform)
+    low, high = r.hashtag_range
+    return VIDEO_SYSTEM.format(
+        usage=_ONE_PAGE.format(platform=platform, reach=brief_for_agent(platform)),
+        title_chars=min(YOUTUBE_TITLE_CHARS, r.hook_chars)
+        if platform == "youtube" else r.hook_chars,
+        brief_len=(f"as much as earns its place, up to about "
+                   f"{r.body_target_chars} characters"),
+        tags=f"{max(low, 1)}-{max(high, 1)}",
+    )
 
 
 class VideoPackageAgent:
@@ -236,6 +290,7 @@ class VideoPackageAgent:
         topic: str = "",
         website_brief: str = "",
         avoid: Optional[list[str]] = None,
+        platform: str = "",
     ) -> VideoPackage:
         target_words = int(seconds * WORDS_PER_SECOND)
         lines = [
@@ -256,5 +311,6 @@ class VideoPackageAgent:
             lines += ["", "Already covered — take a different angle than these:",
                       *(f"- {a}" for a in avoid[:10])]
 
-        output = self.llm.complete(VIDEO_SYSTEM, "\n".join(lines))
-        return parse_package(output, brand.slug, seconds, topic=topic)
+        output = self.llm.complete(_video_system(platform), "\n".join(lines))
+        return parse_package(output, brand.slug, seconds, topic=topic,
+                             platform=platform)

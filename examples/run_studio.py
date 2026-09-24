@@ -1,12 +1,12 @@
 """Post creation studio — no publishing.
 
-Telegram bot (menus for site, count, text/video, topic):
+Telegram bot (menus for site, page, count, topic):
     python examples/run_studio.py --bot
 
 One-off from the command line:
     python examples/run_studio.py agenticcore --posts 3
     python examples/run_studio.py agenticcore --posts 3 --platform telegram
-    python examples/run_studio.py agenticcore --video 2 --seconds 10
+    python examples/run_studio.py agenticcore --video 2 --seconds 10 --platform tiktok
     python examples/run_studio.py agenticcore --posts 3 --topic "Weekend: 30% off"
 
 Needs ANTHROPIC_API_KEY. The bot also needs TELEGRAM_BOT_TOKEN and
@@ -84,6 +84,7 @@ def main() -> None:
         batch = studio.make_videos(
             slug, count=int(flag_value(argv, "--video", 1)),
             seconds=int(flag_value(argv, "--seconds", 30)), topic=topic,
+            platform=flag_value(argv, "--platform"),
         )
         for package in batch.videos:
             for message in package.as_telegram_messages():

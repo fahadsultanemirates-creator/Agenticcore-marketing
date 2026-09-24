@@ -100,15 +100,16 @@ def test_delivered_as_separate_messages_one_per_paste():
     messages = p.as_telegram_messages()
 
     # Label, content, label, content, label, content: what you paste is
-    # never in the same message as the text describing it.
+    # never in the same message as the text describing it. The order is
+    # upload order — script first, then the caption box, then the cover.
     assert len(messages) == 6
-    assert "SCRIPT" in messages[0] and "transparency" in messages[0]
-    assert "SCRIPT" not in messages[1]  # the script itself, alone
-    assert "THUMBNAIL TEXT" in messages[2]
-    assert messages[3] == p.thumbnail_text.strip()
-    assert "YouTube title" in messages[4]
-    assert "#realestate" in messages[5]  # hashtags ride with the caption
-    assert "YouTube title" not in messages[5]
+    assert messages[0].startswith("1. SCRIPT")
+    assert messages[1] == p.script.strip()          # the script alone
+    assert messages[2].startswith("2. DESCRIPTION")
+    assert "#realestate" in messages[3]             # hashtags ride with it
+    assert "DESCRIPTION" not in messages[3]
+    assert messages[4].startswith("3. THUMBNAIL TEXT")
+    assert messages[5] == p.thumbnail_text.strip()
 
 
 def test_ten_and_sixty_seconds_are_different_shapes():

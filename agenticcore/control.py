@@ -1,9 +1,14 @@
 """Menu-driven Telegram control for the post studio.
 
 The approval bot answered one question — yes or no on a finished post. This
-one drives the studio: which site, how many, text or video, what about. The
+one drives the studio: which site, which page, how many, what about. The
 difference in shape is why it is a separate module rather than more
 callbacks bolted onto the approval bot.
+
+A run targets exactly one page. Generating across every text page at once
+produced posts for pages you had no intention of posting to that day, read
+interleaved, and the page also settles whether the run is text or video —
+so picking it first removes a question rather than adding one.
 
 Navigation state lives per chat. Telegram gives you 64 bytes of callback
 data, which is not enough to carry a site slug, a count, a format and a
@@ -21,9 +26,14 @@ from typing import Callable, Optional
 #: Offered counts. Small numbers first because three good posts you will
 #: actually read beats ten you skim — the point of a batch is choice, not
 #: volume, and a batch too big to read carefully is worse than a small one.
-POST_COUNTS = (1, 3, 5, 10)
+POST_COUNTS = (1, 2, 3, 5)
 VIDEO_COUNTS = (1, 2, 3)
 VIDEO_LENGTHS = (10, 30, 60)
+
+#: Drawn above each item so a batch reads as separate posts rather than one
+#: wall. Telegram stacks consecutive messages from the same sender with
+#: almost no gap, so separate messages alone do not look separate.
+DIVIDER = "━━━━━━━━━━━━━━━"
 
 #: How long Telegram holds an empty long-poll open. Also the worst-case
 #: delay before Ctrl+C is noticed, which is what sets it this low.
@@ -33,25 +43,46 @@ POLL_SECONDS = 5
 
 @dataclass
 class Selection:
-    """What a chat has chosen so far."""
+    """What a chat has chosen so far.
+
+    One page per run, always. Spreading a batch across every text page at
+    once meant generating posts for pages you had no intention of posting
+    to that day, and reading them interleaved. Choosing the page first also
+    settles whether the run is text or video — a page takes one or the
+    other — so there is no separate format question to get wrong.
+    """
 
     brand_slug: Optional[str] = None
-    kind: str = "text"           # text | video
     count: int = 3
     seconds: int = 30
     platform: Optional[str] = None
+    is_video: bool = False
     topic: Optional[str] = None
     awaiting_topic: bool = False
 
-    def summary(self, brand_name: str = "") -> str:
-        parts = [brand_name or self.brand_slug or "no site"]
-        if self.kind == "video":
+    def summary(self, brand_name: str = "", page_label: str = "") -> str:
+        parts = [brand_name or self.brand_slug or "no site",
+                 page_label or self.platform or "no page"]
+        if self.is_video:
             parts.append(f"{self.count} × {self.seconds}s video")
         else:
             parts.append(f"{self.count} post(s)")
-            parts.append(self.platform or "across text pages")
         parts.append(f"topic: {self.topic}" if self.topic else "topic: framework decides")
         return " · ".join(parts)
+
+
+def _heading(*parts: str, topic: str = "") -> str:
+    """A ruled header so one item is visibly not the next.
+
+    Consecutive messages from the same sender stack in Telegram with
+    almost no gap, so splitting a post off its label is not enough on its
+    own — the batch still reads as one continuous wall. A rule above each
+    item is what actually separates them on a phone.
+    """
+
+    line = " · ".join(p for p in parts if p)
+    head = f"{DIVIDER}\n{line}"
+    return f"{head}\n{topic}" if topic else head
 
 
 def button(text: str, action: str) -> dict:
@@ -76,19 +107,35 @@ class ControlBot:
 
     # -- menus ---------------------------------------------------------
 
+    def page_label(self, sel: Selection) -> str:
+        """The chosen page's own label, as the brand config names it."""
+
+        if not (sel.brand_slug and sel.platform):
+            return ""
+        brand = self.brands.get(sel.brand_slug)
+        for target in brand.channels:
+            if target.channel == sel.platform:
+                return target.label or target.channel
+        return sel.platform
+
     def main_menu(self, chat_id: str) -> None:
         sel = self.selection(chat_id)
         brand = self.brands.get(sel.brand_slug) if sel.brand_slug else None
         name = brand.name if brand else ""
 
+        # The length question only exists for a video page, and showing it
+        # on a text page invites setting something that does nothing.
+        second_row = [button("How many", "menu:count")]
+        if sel.is_video:
+            second_row.append(button("How long", "menu:length"))
+
         self.send(
             chat_id,
-            f"AgenticCore studio\n\n{sel.summary(name)}",
+            f"AgenticCore studio\n\n{sel.summary(name, self.page_label(sel))}",
             rows(
-                [button("Switch site", "menu:site")],
-                [button("Text posts", "kind:text"), button("Video", "kind:video")],
-                [button("How many", "menu:count"),
+                [button("Switch site", "menu:site"),
                  button("Which page", "menu:platform")],
+                second_row,
                 [button("Set a topic", "menu:topic"),
                  button("Let it decide", "topic:auto")],
                 [button("Clear topic history", "topics:reset")],
@@ -106,10 +153,10 @@ class ControlBot:
 
     def count_menu(self, chat_id: str) -> None:
         sel = self.selection(chat_id)
-        options = VIDEO_COUNTS if sel.kind == "video" else POST_COUNTS
+        options = VIDEO_COUNTS if sel.is_video else POST_COUNTS
         self.send(
             chat_id,
-            "How many?" if sel.kind == "text" else "How many videos?",
+            "How many videos?" if sel.is_video else "How many?",
             rows([button(str(n), f"count:{n}") for n in options],
                  [button("Back", "menu:main")]),
         )
@@ -122,16 +169,27 @@ class ControlBot:
         )
 
     def platform_menu(self, chat_id: str) -> None:
+        """Every page the brand has, text and video together.
+
+        There is deliberately no "all pages" option. One page per run is
+        the whole point: you post to one page at a time, so you generate
+        for one page at a time.
+        """
+
         sel = self.selection(chat_id)
         if not sel.brand_slug:
-            return self.send(chat_id, "Pick a site first.", None)
+            self.send(chat_id, "Pick a site first.", None)
+            return self.site_menu(chat_id)
         brand = self.brands.get(sel.brand_slug)
-        pages = self.studio.text_platforms(brand)
+        buttons = []
+        for target in brand.channels:
+            video = self.studio.is_video_page(brand, target.channel)
+            mark = "video" if video else "text"
+            name = target.label or target.channel
+            buttons.append([button(f"{name} — {mark}", f"plat:{target.channel}")])
         self.send(
             chat_id, "Which page?",
-            rows(*[[button(t.label or t.channel, f"plat:{t.channel}")] for t in pages],
-                 [button("All text pages", "plat:all")],
-                 [button("Back", "menu:main")]),
+            rows(*buttons, [button("Back", "menu:main")]),
         )
 
     def ask_topic(self, chat_id: str) -> None:
@@ -176,17 +234,12 @@ class ControlBot:
 
         if name == "site":
             sel.brand_slug = value
-            # A different site means the old page choice may not exist on it.
+            # A different site means the old page choice may not exist on
+            # it, so go straight to picking one rather than leaving the
+            # selection pointing at a page this brand does not have.
             sel.platform = None
-            return self.main_menu(chat_id)
-
-        if name == "kind":
-            sel.kind = value
-            if value == "video":
-                sel.platform = None
-                sel.count = min(sel.count, max(VIDEO_COUNTS))
-                return self.length_menu(chat_id)
-            return self.main_menu(chat_id)
+            sel.is_video = False
+            return self.platform_menu(chat_id)
 
         if name == "count":
             sel.count = int(value)
@@ -197,7 +250,13 @@ class ControlBot:
             return self.main_menu(chat_id)
 
         if name == "plat":
-            sel.platform = None if value == "all" else value
+            sel.platform = value
+            brand = self.brands.get(sel.brand_slug) if sel.brand_slug else None
+            sel.is_video = bool(brand) and self.studio.is_video_page(brand, value)
+            if sel.is_video:
+                # Three text posts is a sensible default; three videos is
+                # not — each is a separate shoot.
+                sel.count = min(sel.count, max(VIDEO_COUNTS))
             return self.main_menu(chat_id)
 
         if name == "topic" and value == "auto":
@@ -222,17 +281,26 @@ class ControlBot:
         if not sel.brand_slug:
             self.send(chat_id, "Pick a site first.", None)
             return self.site_menu(chat_id)
+        if not sel.platform:
+            self.send(chat_id, "Pick a page first.", None)
+            return self.platform_menu(chat_id)
 
         brand = self.brands.get(sel.brand_slug)
-        self.send(chat_id, f"Working on {sel.summary(brand.name)}…", None)
+        label = self.page_label(sel)
+        self.send(chat_id, f"Working on {sel.summary(brand.name, label)}…", None)
 
         try:
-            if sel.kind == "video":
+            if sel.is_video:
                 batch = self.studio.make_videos(
                     sel.brand_slug, count=sel.count, seconds=sel.seconds,
                     topic=sel.topic, allow_repeats=allow_repeats,
+                    platform=sel.platform,
                 )
-                for package in batch.videos:
+                total = len(batch.videos)
+                for i, package in enumerate(batch.videos, 1):
+                    self.send(chat_id, _heading(
+                        f"VIDEO {i} of {total}", label,
+                        f"{package.seconds}s", topic=package.topic), None)
                     for message in package.as_telegram_messages():
                         self.send(chat_id, message, None)
                     for warning in package.warnings():
@@ -244,8 +312,12 @@ class ControlBot:
                 )
                 total = len(batch.posts)
                 for i, post in enumerate(batch.posts, 1):
-                    for message in post.as_telegram_messages(i, total):
-                        self.send(chat_id, message, None)
+                    self.send(chat_id, _heading(
+                        f"POST {i} of {total}", label,
+                        post.score_line(), topic=post.topic), None)
+                    self.send(chat_id, post.caption.strip(), None)
+                    for extra in post.extra_messages():
+                        self.send(chat_id, extra, None)
         except Exception as exc:  # noqa: BLE001
             # A failed generation must leave the menu usable rather than
             # dropping the chat into a dead end with no way back.

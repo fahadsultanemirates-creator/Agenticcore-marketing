@@ -61,6 +61,23 @@ class GeneratedPost:
     revised: bool = False
     first_comment: Optional[str] = None
 
+    def score_line(self) -> str:
+        """The reach verdict as one short phrase, or nothing."""
+
+        if self.reach_score is None:
+            return ""
+        return (f"reach {self.reach_score}/10 → rewritten" if self.revised
+                else f"reach {self.reach_score}/10")
+
+    def extra_messages(self) -> list[str]:
+        """Anything that goes on the page separately from the post itself."""
+
+        if not self.first_comment:
+            return []
+        return ["FIRST COMMENT — post this as a reply to your own post. "
+                "A link in the body costs reach:",
+                self.first_comment.strip()]
+
     def label(self, index: int = 0, total: int = 0) -> str:
         """The header line: which post, which page, how it scored."""
 
@@ -295,6 +312,17 @@ class PostStudio:
     def text_platforms(self, brand: BrandProfile) -> list:
         return [t for t in brand.channels if brand.media_for(t) != MEDIA_VIDEO]
 
+    def video_platforms(self, brand: BrandProfile) -> list:
+        return [t for t in brand.channels if brand.media_for(t) == MEDIA_VIDEO]
+
+    def is_video_page(self, brand: BrandProfile, platform: str) -> bool:
+        """Does this page take video rather than text?"""
+
+        for target in brand.channels:
+            if target.channel == platform:
+                return brand.media_for(target) == MEDIA_VIDEO
+        return False
+
     def make_posts(
         self,
         brand_slug: str,
@@ -394,8 +422,16 @@ class PostStudio:
         seconds: int = 30,
         topic: Optional[str] = None,
         allow_repeats: bool = False,
+        platform: Optional[str] = None,
     ) -> PostBatch:
-        """Write ``count`` video packages — script, thumbnail, caption."""
+        """Write ``count`` video packages — script, description, thumbnail.
+
+        Naming a ``platform`` writes the description for that page rather
+        than to the tightest common denominator. A TikTok caption stops
+        earning attention around 300 characters where YouTube's keeps
+        working for thousands, so one caption for all three is a
+        compromise worth avoiding whenever the page is known.
+        """
 
         brand = self.brands.get(brand_slug)
         website = self.website_brief(brand_slug)
@@ -411,6 +447,7 @@ class PostStudio:
                 topic=_headline(subject),
                 website_brief=website,
                 avoid=batch.topics_used + [v.script[:120] for v in batch.videos],
+                platform=platform or "",
             )
             batch.videos.append(package)
             batch.topics_used.append(package.topic)
