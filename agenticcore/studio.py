@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from agenticcore.brands import MEDIA_VIDEO, BrandProfile
+from agenticcore.hashtags import ensure_hashtags
 from agenticcore.orchestrator import CampaignBrief
 from agenticcore.reach import LINK_FIRST_COMMENT, rules_for, split_link
 from agenticcore.topics import TopicLedger, topic_key
@@ -361,6 +362,10 @@ class PostStudio:
             )
             if brand.disclaimer and brand.disclaimer not in caption:
                 caption = f"{caption}\n\n{brand.disclaimer}"
+            # Last, so the tags are the final line of the post as they are
+            # on the page — and after the critic, which rewrites freely and
+            # drops them about as often as it keeps them.
+            caption = ensure_hashtags(caption, target.channel, brand, index)
 
             post = GeneratedPost(
                 id=str(uuid.uuid4()), brand_slug=brand_slug,

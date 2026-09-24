@@ -10,6 +10,7 @@ from agenticcore.research import (
     OpportunityStore, SignalStore, TerritoryStore, WebsiteStore,
     parse_opportunities, parse_profile, parse_signals, parse_territory,
 )
+from agenticcore.hashtags import found_in
 from agenticcore.studio import GeneratedPost, PostStudio
 
 
@@ -187,7 +188,9 @@ def test_the_disclaimer_is_applied_to_generated_posts(tmp_path):
 
     batch = studio.make_posts("acme", count=1, platform="telegram")
 
-    assert batch.posts[0].caption.endswith("Information only.")
+    # Hashtags are appended after it, so the disclaimer is present but no
+    # longer the final line.
+    assert "Information only." in batch.posts[0].caption
 
 
 def test_video_batches_get_distinct_topics_too(tmp_path):
@@ -277,7 +280,7 @@ def test_a_rewritten_post_says_so_next_to_its_score(tmp_path):
     post = studio.make_posts("acme", count=1, platform="telegram").posts[0]
 
     assert post.revised is True
-    assert post.caption == "A much stronger opening."
+    assert post.caption.startswith("A much stronger opening.")
     assert "→ rewritten" in post.as_telegram_message()
 
 
@@ -479,3 +482,15 @@ def test_a_first_comment_is_its_own_paste():
     assert messages[1] == "Body without the link."
     assert messages[-1] == "Details: acme.test/x"
     assert "post separately" in messages[-2]
+
+
+def test_every_post_in_a_batch_carries_hashtags(tmp_path):
+    """The reported gap: one post tagged, the next two bare."""
+
+    studio, _, _ = make_studio(tmp_path)
+
+    batch = studio.make_posts("acme", count=3)
+
+    assert len(batch.posts) == 3
+    for post in batch.posts:
+        assert found_in(post.caption), f"{post.platform} post came back bare"

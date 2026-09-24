@@ -94,7 +94,7 @@ REACH_RULES: dict[str, PlatformReach] = {
     "youtube": PlatformReach(
         platform="youtube", discovery=DISCOVERY_ALGORITHMIC,
         hook_chars=100, body_target_chars=5000,
-        link_policy=LINK_IN_BODY_OK, hashtag_range=(0, 3),
+        link_policy=LINK_IN_BODY_OK, hashtag_range=(2, 3),
         best_format="short (vertical video)", search_matters=True,
         notes="Both a feed and the second-largest search engine. Shorts carry "
               "new channels; keyword-led titles keep earning views for months.",
@@ -112,7 +112,7 @@ REACH_RULES: dict[str, PlatformReach] = {
     "facebook": PlatformReach(
         platform="facebook", discovery=DISCOVERY_GRAPH,
         hook_chars=125, body_target_chars=500,
-        link_policy=LINK_FIRST_COMMENT, hashtag_range=(0, 2),
+        link_policy=LINK_FIRST_COMMENT, hashtag_range=(2, 3),
         best_format="native video",
         notes="Page reach is structurally low and links are suppressed to keep "
               "people on-platform. Native video travels furthest.",
@@ -120,21 +120,22 @@ REACH_RULES: dict[str, PlatformReach] = {
     "twitter": PlatformReach(
         platform="twitter", discovery=DISCOVERY_GRAPH,
         hook_chars=140, body_target_chars=280,
-        link_policy=LINK_FIRST_COMMENT, hashtag_range=(0, 2),
+        link_policy=LINK_FIRST_COMMENT, hashtag_range=(1, 2),
         best_format="thread or native video",
         notes="A link in the post you want reach on costs reach — reply to "
-              "yourself with it. Threads buy dwell time. Hashtags do nothing here.",
+              "yourself with it. Threads buy dwell time. Hashtags do not lift "
+              "reach here — keep it to one, as a label, never as a strategy.",
     ),
     "snapchat": PlatformReach(
         platform="snapchat", discovery=DISCOVERY_ALGORITHMIC,
         hook_chars=80, body_target_chars=250,
-        link_policy=LINK_NOT_CLICKABLE, hashtag_range=(0, 2),
+        link_policy=LINK_NOT_CLICKABLE, hashtag_range=(1, 2),
         best_format="vertical video",
     ),
     "pinterest": PlatformReach(
         platform="pinterest", discovery=DISCOVERY_ALGORITHMIC,
         hook_chars=100, body_target_chars=500,
-        link_policy=LINK_IN_BODY_OK, hashtag_range=(0, 3),
+        link_policy=LINK_IN_BODY_OK, hashtag_range=(2, 3),
         best_format="tall image", search_matters=True,
         notes="Effectively a visual search engine — keyword-led descriptions "
               "keep surfacing for months.",
@@ -142,10 +143,12 @@ REACH_RULES: dict[str, PlatformReach] = {
     "telegram": PlatformReach(
         platform="telegram", discovery=DISCOVERY_BROADCAST,
         hook_chars=120, body_target_chars=800,
-        link_policy=LINK_IN_BODY_OK, hashtag_range=(0, 0),
+        link_policy=LINK_IN_BODY_OK, hashtag_range=(2, 3),
         best_format="text with media",
         notes="Links are fine here and cost nothing, unlike every feed-based "
-              "platform. Depth is rewarded: these people opted in.",
+              "platform. Depth is rewarded: these people opted in. Hashtags "
+              "are clickable and searchable inside the channel, so they work "
+              "as an index of past posts rather than as a discovery lever.",
     ),
     "whatsapp": PlatformReach(
         platform="whatsapp", discovery=DISCOVERY_BROADCAST,
@@ -163,7 +166,7 @@ REACH_RULES: dict[str, PlatformReach] = {
 DEFAULT_REACH = PlatformReach(
     platform="unknown", discovery=DISCOVERY_GRAPH,
     hook_chars=125, body_target_chars=600,
-    link_policy=LINK_FIRST_COMMENT, hashtag_range=(0, 3),
+    link_policy=LINK_FIRST_COMMENT, hashtag_range=(2, 3),
     best_format="image or video",
 )
 
@@ -177,7 +180,12 @@ def brief_for_agent(platform: str) -> str:
 
     r = rules_for(platform)
     low, high = r.hashtag_range
-    hashtags = "none — they do not help here" if high == 0 else f"{low}-{high}"
+    if high == 0:
+        hashtags = "none — this platform has no hashtag support"
+    elif low:
+        hashtags = f"{low}-{high}, always — every post ends with them"
+    else:
+        hashtags = f"0-{high}"
     link = {
         LINK_IN_BODY_OK: "a link in the body is fine here",
         LINK_FIRST_COMMENT: "NO link in the post body — it costs reach; the link "
