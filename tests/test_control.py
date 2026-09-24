@@ -305,3 +305,50 @@ def test_clearing_topic_history_frees_everything(tmp_path):
 
     assert "Everything is available again" in sent[0][1]
     assert bot.studio.used_topics("acme") == set()
+
+
+def test_the_menu_survives_a_message_long_enough_to_split():
+    """A long video script must not cost you the buttons."""
+
+    from agenticcore.control import MAX_MESSAGE_CHARS, TelegramTransport
+
+    sent = []
+
+    class Recording(TelegramTransport):
+        def __init__(self):
+            self.token = "t"
+            self.authorized = {"1"}
+            self._offset = 0
+
+        def _api(self, method, **params):
+            sent.append(params)
+            return {}
+
+    keyboard = {"inline_keyboard": [[{"text": "Menu", "callback_data": "menu"}]]}
+    Recording().send("1", "x" * (MAX_MESSAGE_CHARS * 2 + 10), keyboard)
+
+    assert len(sent) > 1, "this text should have split"
+    assert "reply_markup" not in sent[0]
+    assert sent[-1]["reply_markup"] == keyboard
+
+
+def test_a_short_message_still_carries_its_keyboard():
+    from agenticcore.control import TelegramTransport
+
+    sent = []
+
+    class Recording(TelegramTransport):
+        def __init__(self):
+            self.token = "t"
+            self.authorized = {"1"}
+            self._offset = 0
+
+        def _api(self, method, **params):
+            sent.append(params)
+            return {}
+
+    keyboard = {"inline_keyboard": [[{"text": "Menu", "callback_data": "menu"}]]}
+    Recording().send("1", "short", keyboard)
+
+    assert len(sent) == 1
+    assert sent[0]["reply_markup"] == keyboard

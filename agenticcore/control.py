@@ -25,6 +25,11 @@ POST_COUNTS = (1, 3, 5, 10)
 VIDEO_COUNTS = (1, 2, 3)
 VIDEO_LENGTHS = (10, 30, 60)
 
+#: How long Telegram holds an empty long-poll open. Also the worst-case
+#: delay before Ctrl+C is noticed, which is what sets it this low.
+POLL_SECONDS = 5
+
+
 
 @dataclass
 class Selection:
@@ -303,7 +308,7 @@ class TelegramTransport:
 
         response = requests.post(
             f"https://api.telegram.org/bot{self.token}/{method}",
-            json=params, timeout=40,
+            json=params, timeout=POLL_SECONDS + 10,
         )
         response.raise_for_status()
         data = response.json()
@@ -315,21 +320,53 @@ class TelegramTransport:
         # Telegram rejects messages over 4096 characters, and a long video
         # script or a 10-post batch will exceed that — so split rather than
         # lose the tail of a post.
-        for chunk in _split_message(text):
+        chunks = _split_message(text)
+        last = len(chunks) - 1
+        for i, chunk in enumerate(chunks):
             params = {"chat_id": chat_id, "text": chunk}
-            if keyboard and chunk is _split_message(text)[-1]:
+            # The buttons ride on the final chunk. Comparing chunks by
+            # position, not identity: an earlier version re-split the text
+            # and tested `chunk is chunks[-1]`, which holds only while the
+            # message is short enough not to split at all. Past 4096
+            # characters the two calls returned different string objects,
+            # the test never passed, and the menu vanished — leaving no way
+            # back except /start.
+            if keyboard and i == last:
                 params["reply_markup"] = keyboard
             self._api("sendMessage", **params)
 
-    def run(self, bot: ControlBot, poll_seconds: int = 30) -> None:
-        """Poll forever, handing updates to the bot. Ctrl+C to stop."""
+    def run(self, bot: ControlBot, poll_seconds: int = POLL_SECONDS) -> None:
+        """Poll until interrupted, handing updates to the bot.
 
-        print("Control bot listening. Send /start in Telegram.")
-        while True:
-            updates = self._api("getUpdates", offset=self._offset, timeout=poll_seconds)
-            for update in updates:
-                self._offset = update["update_id"] + 1
-                self._handle(bot, update)
+        ``poll_seconds`` is how long Telegram holds an empty poll open. It
+        doubles as how long Ctrl+C can take to land: a blocking socket read
+        is not interruptible on Windows, so the keypress waits for the poll
+        to return before Python sees it. Short enough to feel responsive,
+        long enough not to hammer the API.
+        """
+
+        print(f"Control bot listening. Send /start in Telegram. "
+              f"Ctrl+C to stop (up to {poll_seconds}s).")
+        import requests
+
+        try:
+            while True:
+                try:
+                    updates = self._api("getUpdates", offset=self._offset,
+                                        timeout=poll_seconds)
+                except requests.exceptions.RequestException as exc:
+                    # A dropped connection is not a reason to stop listening.
+                    # This runs unattended on a VPS, and a bot that dies on
+                    # the first blip is one you find dead hours later with no
+                    # idea when it went.
+                    print(f"network hiccup ({exc.__class__.__name__}), retrying")
+                    continue
+                for update in updates:
+                    self._offset = update["update_id"] + 1
+                    self._handle(bot, update)
+        except KeyboardInterrupt:
+            # A stack trace on a deliberate Ctrl+C reads like a crash.
+            print("\nStopped.")
 
     def _handle(self, bot: ControlBot, update: dict) -> None:
         callback = update.get("callback_query")
