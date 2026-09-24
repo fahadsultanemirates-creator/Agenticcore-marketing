@@ -1,3 +1,4 @@
+import re
 import json
 
 import pytest
@@ -163,8 +164,13 @@ def test_generating_sends_one_message_per_post(tmp_path):
     bot.on_action("1", "go")
 
     # The first message is "Working on ...", the last is the follow-up menu.
-    posts = [t for _, t, _ in sent if t.split("\n")[0].startswith("[")]
-    assert len(posts) == 3
+    # Each post arrives as a label message plus the caption on its own, so
+    # the caption can be copied without a header to strip off it.
+    labels = [t for _, t, _ in sent if re.match(r"^\[\d+/\d+ · ", t)]
+    assert len(labels) == 3
+    # A label is only ever a label: nothing you would paste shares a
+    # message with it, so Copy on the caption yields the caption.
+    assert all(len(t.splitlines()) <= 2 for t in labels)
     assert any("Copy what you want" in t for _, t, _ in sent)
 
 

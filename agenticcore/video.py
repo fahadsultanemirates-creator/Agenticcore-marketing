@@ -109,27 +109,30 @@ class VideoPackage:
     def as_telegram_messages(self) -> list[str]:
         """The package split the way it gets used: one message per paste.
 
-        Three messages rather than one, because each is copied into a
-        different field at upload time and a single blob means picking it
-        apart by hand every time.
+        Each part is copied into a different field at upload time, so they
+        never share a message — and neither does a part share one with its
+        own label. Telegram copies whole messages, so a label sitting above
+        the script is a line to delete by hand after every paste. Labels
+        are their own messages; the thing you copy is alone in its.
         """
 
         header = f"{self.seconds}s video"
         if self.topic:
             header += f" — {self.topic}"
 
-        messages = [f"[{header}]\nSCRIPT (read aloud):\n\n{self.script.strip()}"]
+        messages = [f"[{header}]\nSCRIPT — read aloud:", self.script.strip()]
         if self.thumbnail_text:
-            messages.append(f"[THUMBNAIL TEXT — {self.thumbnail_text.split().__len__()} words]\n\n"
-                            f"{self.thumbnail_text.strip()}")
+            messages.append(
+                f"THUMBNAIL TEXT — {len(self.thumbnail_text.split())} words:")
+            messages.append(self.thumbnail_text.strip())
         if self.brief:
             body = self.brief.strip()
             if self.hashtags:
                 body += "\n\n" + " ".join(self.hashtags)
             messages.append(
-                f"[CAPTION — first line is the YouTube title "
-                f"({len(self.title_line)}/{YOUTUBE_TITLE_CHARS} chars)]\n\n{body}"
-            )
+                f"CAPTION — first line is the YouTube title "
+                f"({len(self.title_line)}/{YOUTUBE_TITLE_CHARS} chars):")
+            messages.append(body)
         return messages
 
 

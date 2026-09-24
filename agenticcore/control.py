@@ -239,7 +239,8 @@ class ControlBot:
                 )
                 total = len(batch.posts)
                 for i, post in enumerate(batch.posts, 1):
-                    self.send(chat_id, post.as_telegram_message(i, total), None)
+                    for message in post.as_telegram_messages(i, total):
+                        self.send(chat_id, message, None)
         except Exception as exc:  # noqa: BLE001
             # A failed generation must leave the menu usable rather than
             # dropping the chat into a dead end with no way back.

@@ -60,7 +60,9 @@ class GeneratedPost:
     revised: bool = False
     first_comment: Optional[str] = None
 
-    def as_telegram_message(self, index: int = 0, total: int = 0) -> str:
+    def label(self, index: int = 0, total: int = 0) -> str:
+        """The header line: which post, which page, how it scored."""
+
         head = f"[{self.platform}]"
         if total:
             head = f"[{index}/{total} · {self.platform}]"
@@ -69,8 +71,31 @@ class GeneratedPost:
                      else f" reach {self.reach_score}/10")
         if self.topic:
             head += f"\n{self.topic}"
+        return head
 
-        body = f"{head}\n\n{self.caption}"
+    def as_telegram_messages(self, index: int = 0, total: int = 0) -> list[str]:
+        """Label and post as separate messages, one paste per message.
+
+        A label sharing a message with the post text cannot be copied off
+        it: Telegram copies a whole message or nothing, so "[1/3 ·
+        facebook] reach 5/10" has to be deleted by hand after every paste.
+        Keeping the caption alone in its own message makes long-press →
+        Copy give exactly what goes on the page.
+        """
+
+        messages = [self.label(index, total), self.caption.strip()]
+        if self.first_comment:
+            messages.append(
+                "FIRST COMMENT — post separately, under your own post. "
+                "A link in the body costs reach:"
+            )
+            messages.append(self.first_comment.strip())
+        return messages
+
+    def as_telegram_message(self, index: int = 0, total: int = 0) -> str:
+        """The whole post as one block — for terminal output, not Telegram."""
+
+        body = f"{self.label(index, total)}\n\n{self.caption}"
         if self.first_comment:
             body += f"\n\nFIRST COMMENT (post separately — a link in the body costs reach):\n{self.first_comment}"
         return body

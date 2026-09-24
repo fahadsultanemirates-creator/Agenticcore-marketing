@@ -10,7 +10,7 @@ from agenticcore.research import (
     OpportunityStore, SignalStore, TerritoryStore, WebsiteStore,
     parse_opportunities, parse_profile, parse_signals, parse_territory,
 )
-from agenticcore.studio import PostStudio
+from agenticcore.studio import GeneratedPost, PostStudio
 
 
 def write_brand(tmp_path, **overrides):
@@ -451,3 +451,31 @@ def test_telegram_gets_no_first_comment_because_links_are_fine_there(tmp_path):
     post = studio.make_posts("acme", count=1, platform="telegram").posts[0]
 
     assert post.first_comment is None
+
+
+def test_post_label_and_caption_are_separate_messages():
+    """Copying a post must not drag the header along with it."""
+
+    post = GeneratedPost(
+        id="p1", brand_slug="acme", platform="facebook",
+        caption="The post itself.", topic="pricing", reach_score=5, revised=True,
+    )
+
+    messages = post.as_telegram_messages(index=1, total=3)
+
+    assert len(messages) == 2
+    assert "1/3" in messages[0] and "reach 5/10 → rewritten" in messages[0]
+    assert messages[1] == "The post itself."  # nothing to strip before pasting
+
+
+def test_a_first_comment_is_its_own_paste():
+    post = GeneratedPost(
+        id="p1", brand_slug="acme", platform="linkedin",
+        caption="Body without the link.", first_comment="Details: acme.test/x",
+    )
+
+    messages = post.as_telegram_messages()
+
+    assert messages[1] == "Body without the link."
+    assert messages[-1] == "Details: acme.test/x"
+    assert "post separately" in messages[-2]
